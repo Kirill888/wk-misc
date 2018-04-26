@@ -1,6 +1,7 @@
 from matplotlib import pyplot as plt
 import numpy as np
 import rasterio
+import hashlib
 from types import SimpleNamespace
 import concurrent.futures as fut
 
@@ -31,6 +32,23 @@ def mk_fname(params, ext='pickle', prefix=None):
                                                    ext=ext)
 
     return find_next_available_file(fmt)
+
+
+def npz_data_hash(fname, varname=None):
+    def digest(a):
+        return hashlib.sha256(a.tobytes('C')).hexdigest()
+
+    f = np.load(fname)
+
+    if len(f.files) == 1 and varname is None:
+        varname = f.files[0]
+
+    if varname is not None:
+        if varname not in f:
+            return None
+        return digest(f[varname])
+
+    return {k: digest(f[k]) for k in f}
 
 
 def add_hist(data, n, ax=None, n_sigma=None, **kwargs):
@@ -307,7 +325,7 @@ def main(args=None):
     if args is None:
         args = sys.argv[1:]
 
-    if len(args) not in (2,3) :
+    if len(args) not in (2, 3):
         print('Expect 2 args: file_list num_threads <prefix>')
         return 1
 
