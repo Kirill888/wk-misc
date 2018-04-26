@@ -249,3 +249,64 @@ def process_bunch(files, pp, **kwargs):
                            stats=rr,
                            params=pp,
                            t_total=t_total)
+
+
+def main(args=None):
+    import sys
+    import pickle
+
+    def without(xx, skip):
+        return SimpleNamespace(**{k: v for k, v in xx.__dict__.items() if k not in skip})
+
+    if args is None:
+        args = sys.argv[1:]
+
+    if len(args) != 2:
+        print('Expect 2 args: file_list num_threads')
+        return 1
+
+    file_list_file, nthreads = args[:2]
+    nthreads = int(nthreads)
+
+    with open(file_list_file, 'r') as f:
+        files = [s.rstrip() for s in f.readlines()]
+
+    pp = SimpleNamespace(tile=(-9, -18),  # TODO: extract from file name?
+                         block=(8, 2),
+                         block_shape=(256, 256),
+                         dtype='uint8',
+                         nthreads=nthreads,
+                         band=1)
+
+    print('''Files:
+{}
+ ...
+{}
+    files   - {:d}
+    threads - {:d}
+    '''.format('\n'.join(files[:3]),
+               '\n'.join(files[-2:]),
+               len(files),
+               pp.nthreads))
+
+    xx = process_bunch(files, pp)
+
+    fnames = {ext: mk_fname(xx.params, ext=ext, prefix='M5XL_ZIP')
+              for ext in ['pickle', 'npz']}
+
+    pickle.dump(without(xx, ['data']),
+                open(fnames['pickle'], 'wb'))
+
+    np.savez(fnames['npz'], data=xx.data)
+
+    print('''Saved results to:
+    - {}
+    - {}
+'''.format(fnames['pickle'], fnames['npz']))
+
+    return 0
+
+
+if __name__ == '__main__':
+    import sys
+    sys.exit(main())
