@@ -22,10 +22,10 @@ def mk_fname(params, ext='pickle', prefix=None):
     if prefix is None:
         prefix = 'results'
 
-    fmt = '{prefix}_{p.tile[0]:d}_{p.tile[1]:d}b{p.block[0]:d}_{p.block[1]:d}B{p.band}__{p.nthreads:02d}_%03d.{ext}'.format(
-        prefix=prefix,
-        p=params,
-        ext=ext)
+    fmt = ('{prefix}_{p.tile[0]:d}_{p.tile[1]:d}b{p.block[0]:d}_{p.block[1]:d}B{p.band}'
+           '__{p.nthreads:02d}_%03d.{ext}').format(prefix=prefix,
+                                                   p=params,
+                                                   ext=ext)
 
     return find_next_available_file(fmt)
 
@@ -72,19 +72,18 @@ Time:
  total_cpu: {:.2f} sec
  walltime : {:.2f} sec
 -------------------------------------------------------------
-'''.format(
-    hdr,
-    chunk_size.shape[0],
-    chunk_size.sum(),
-    chunk_size.mean().round(), chunk_size.min(), chunk_size.max(),
-    t_total.mean(), t_total.min(), t_total.max(),
+'''.format(hdr,
+           chunk_size.shape[0],
+           chunk_size.sum(),
+           chunk_size.mean().round(), chunk_size.min(), chunk_size.max(),
+           t_total.mean(), t_total.min(), t_total.max(),
 
-    t_open.mean(), t_open.min(), t_open.max(), (t_open/t_total).mean()*100,
-    t_read.mean(), t_read.min(), t_read.max(), (t_read/t_total).mean()*100,
+           t_open.mean(), t_open.min(), t_open.max(), (t_open/t_total).mean()*100,
+           t_read.mean(), t_read.min(), t_read.max(), (t_read/t_total).mean()*100,
 
-    (t_total.sum()*1e-3).round(),
-    xx.t_total
-).strip()
+           (t_total.sum()*1e-3).round(),
+           xx.t_total).strip()
+
 
 def plot_results(rr, fig=None):
     chunk_size = np.r_[[r.chunk_size for r in rr]]
@@ -122,29 +121,27 @@ def plot_results(rr, fig=None):
 
 
 def plot_stats_results(data, fig):
-    n_threads, total_t, total_b = np.r_[[(s.params.nthreads, s.t_total, sum([x.chunk_size for x in s.stats])) for s in data]].T
+    n_threads, total_t, total_b = np.r_[[(s.params.nthreads, s.t_total, sum([x.chunk_size for x in s.stats]))
+                                         for s in data]].T
     best_idx = total_t.argmin()
 
-
-    ax = fig.add_subplot(2,2,1)
+    ax = fig.add_subplot(2, 2, 1)
     ax.plot(n_threads, total_t, 'bo-', linewidth=3, alpha=0.7)
     ax.set_xlabel('# Worker Threads')
     ax.set_ylabel('Time (secs)')
     ax.xaxis.set_ticks(n_threads)
 
     ax.annotate('{s.t_total:.3f} secs using {s.params.nthreads:d} threads'.format(s=data[best_idx]),
-            xy=(n_threads[best_idx], total_t[best_idx]),
-            xytext=(0.3, 0.5),
-            textcoords='axes fraction',
-            arrowprops=dict(facecolor='blue',
-                            alpha=0.4,
-                            shrink=0.05)
-           )
+                xy=(n_threads[best_idx], total_t[best_idx]),
+                xytext=(0.3, 0.5),
+                textcoords='axes fraction',
+                arrowprops=dict(facecolor='blue',
+                                alpha=0.4,
+                                shrink=0.05))
 
-
-    kb_throughput = total_b/total_t/(1<<10)
-    ax = fig.add_subplot(2,2,2)
-    ax.plot(n_threads, kb_throughput, 'ro-',linewidth=3, alpha=0.7)
+    kb_throughput = total_b/total_t/(1 << 10)
+    ax = fig.add_subplot(2, 2, 2)
+    ax.plot(n_threads, kb_throughput, 'ro-', linewidth=3, alpha=0.7)
     ax.set_xlabel('# Worker Threads')
     ax.set_ylabel('KiB/sec')
     ax.xaxis.set_ticks(n_threads)
@@ -157,8 +154,7 @@ def plot_stats_results(data, fig):
                 textcoords='axes fraction',
                 arrowprops=dict(facecolor='red',
                                 alpha=0.4,
-                                shrink=0.05)
-           )
+                                shrink=0.05))
 
     fig.tight_layout()
     return best_idx
