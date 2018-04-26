@@ -1,5 +1,8 @@
 from matplotlib import pyplot as plt
 import numpy as np
+import rasterio
+from types import SimpleNamespace
+import concurrent.futures as fut
 
 
 def find_next_available_file(fname_pattern, max_n=1000, start=1):
@@ -158,3 +161,91 @@ def plot_stats_results(data, fig):
 
     fig.tight_layout()
     return best_idx
+
+
+def read_block_with_stats(uri, block, band=1, out=None):
+    from timeit import default_timer as t_now
+
+    t0 = t_now()
+
+    with rasterio.Env(VSI_CACHE=True,
+                      CPL_VSIL_CURL_ALLOWED_EXTENSIONS='tif',
+                      GDAL_DISABLE_READDIR_ON_OPEN=True):
+
+        with rasterio.open(uri, 'r') as f:
+            win = f.block_window(band, *block)
+            t1 = t_now()
+            out = f.read(band, window=win, out=out)
+            t2 = t_now()
+            chunk_size = f.block_size(band, *block)
+
+    stats = SimpleNamespace(t_open=t1 - t0,
+                            t_total=t2 - t0,
+                            chunk_size=chunk_size)
+    return out, stats
+
+
+def mk_proc(files, params, verbose=True):
+
+    dd = np.ndarray((len(files), *params.block_shape), dtype=params.dtype)
+
+    def proc(f, idx):
+        MAX_DOTS = 50
+        _, stats = read_block_with_stats(f, params.block, out=dd[idx, :, :])
+        stats.idx = idx
+
+        if verbose:
+            print('.', end='')
+            if ((idx+1) % MAX_DOTS) == 0 and idx > 0:
+                print('')
+
+        return stats
+
+    return dd, proc
+
+
+def update_params(pp, **kwargs):
+    from copy import copy
+    pp = copy(pp)
+    for k, v in kwargs.items():
+        if hasattr(pp, k):
+            setattr(pp, k, v)
+        else:
+            raise ValueError("No such parameter: '{}'".format(k))
+    return pp
+
+
+def process_bunch(files, pp, **kwargs):
+    from timeit import default_timer as t_now
+
+    pp = update_params(pp, **kwargs)
+
+    single_threaded = pp.nthreads == 1
+    dd, proc = mk_proc(files, pp, verbose=single_threaded)
+
+    t0 = t_now()
+
+    if single_threaded:
+        rr = [proc(f, i) for i, f in enumerate(files)]
+    else:
+        pool = fut.ThreadPoolExecutor(max_workers=pp.nthreads)
+        futures = [pool.submit(proc, fname, idx)
+                   for idx, fname in enumerate(files)]
+
+        rr = sorted([f.result() for f in fut.wait(futures).done], key=lambda s: s.idx)
+
+        assert len(rr) == len(files)
+
+    t_total = t_now() - t0
+
+    print('\nDone: {:d} in {:.3f} secs using {:d} thread{}'.format(
+        len(rr),
+        t_total,
+        pp.nthreads,
+        's' if pp.nthreads > 1 else '',
+    ))
+
+    return SimpleNamespace(data=dd,
+                           stats=rr,
+                           params=pp,
+                           t_total=t_total)
