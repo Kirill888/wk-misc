@@ -128,11 +128,14 @@ def plot_stats_results(data, fig):
                                          for s in data]].T
     best_idx = total_t.argmin()
 
+    x_ticks = np.array([1] + list(range(4, int(n_threads.max()), 4))
+                       + [n_threads.max()])
+
     ax = fig.add_subplot(2, 2, 1)
     ax.plot(n_threads, total_t, 'bo-', linewidth=3, alpha=0.7)
     ax.set_xlabel('# Worker Threads')
     ax.set_ylabel('Time (secs)')
-    ax.xaxis.set_ticks(n_threads)
+    ax.xaxis.set_ticks(x_ticks)
 
     ax.annotate('{s.t_total:.3f} secs using {s.params.nthreads:d} threads'.format(s=data[best_idx]),
                 xy=(n_threads[best_idx], total_t[best_idx]),
@@ -147,7 +150,7 @@ def plot_stats_results(data, fig):
     ax.plot(n_threads, kb_throughput, 'ro-', linewidth=3, alpha=0.7)
     ax.set_xlabel('# Worker Threads')
     ax.set_ylabel('KiB/sec')
-    ax.xaxis.set_ticks(n_threads)
+    ax.xaxis.set_ticks(x_ticks)
 
     ax.annotate('{kbps:.0f} KiB/s using {s.params.nthreads:d} threads'.format(
         kbps=kb_throughput[best_idx],
@@ -195,7 +198,7 @@ def mk_proc(files, params, verbose=True):
         stats.idx = idx
 
         if verbose:
-            print('.', end='')
+            print('.', end='', flush=True)
             if ((idx+1) % MAX_DOTS) == 0 and idx > 0:
                 print('')
 
@@ -251,21 +254,12 @@ def process_bunch(files, pp, **kwargs):
                            t_total=t_total)
 
 
-def main(args=None):
-    import sys
+def run_main(file_list_file, nthreads, prefix='MXL5'):
     import pickle
 
     def without(xx, skip):
         return SimpleNamespace(**{k: v for k, v in xx.__dict__.items() if k not in skip})
 
-    if args is None:
-        args = sys.argv[1:]
-
-    if len(args) != 2:
-        print('Expect 2 args: file_list num_threads')
-        return 1
-
-    file_list_file, nthreads = args[:2]
     nthreads = int(nthreads)
 
     with open(file_list_file, 'r') as f:
@@ -291,7 +285,7 @@ def main(args=None):
 
     xx = process_bunch(files, pp)
 
-    fnames = {ext: mk_fname(xx.params, ext=ext, prefix='M5XL_ZIP')
+    fnames = {ext: mk_fname(xx.params, ext=ext, prefix=prefix)
               for ext in ['pickle', 'npz']}
 
     pickle.dump(without(xx, ['data']),
@@ -305,6 +299,19 @@ def main(args=None):
 '''.format(fnames['pickle'], fnames['npz']))
 
     return 0
+
+
+def main(args=None):
+    import sys
+
+    if args is None:
+        args = sys.argv[1:]
+
+    if len(args) not in (2,3) :
+        print('Expect 2 args: file_list num_threads <prefix>')
+        return 1
+
+    return run_main(*args)
 
 
 if __name__ == '__main__':
