@@ -51,9 +51,22 @@ def npz_data_hash(fname, varname=None):
     return {k: digest(f[k]) for k in f}
 
 
-def add_hist(data, n, ax=None, n_sigma=None, **kwargs):
-    if n_sigma is not None:
+def link_x_axis(*axs, start_from_zero=None):
+    x_min = min(ax.axis()[0] for ax in axs)
+    x_max = max(ax.axis()[1] for ax in axs)
+
+    if start_from_zero and x_min > 0:
+        x_min = 0
+
+    for ax in axs:
+        ax.axis((x_min, x_max) + ax.axis()[2:])
+
+
+def add_hist(data, n, ax=None, n_sigma=None, thresh=None, **kwargs):
+    if n_sigma is not None and thresh is None:
         thresh = data.mean() + np.sqrt(data.var())
+
+    if thresh is not None:
         data = data[data < thresh]
 
     if ax is None:
@@ -62,7 +75,39 @@ def add_hist(data, n, ax=None, n_sigma=None, **kwargs):
     return ax.hist(data, n, **kwargs)
 
 
-def gen_stats_report(xx):
+def unpack_stats(xx, ms=False):
+    t_scaler = 1000 if ms else 1
+
+    chunk_size = np.r_[[r.chunk_size for r in xx.stats]]
+    t_open = np.r_[[r.t_open for r in xx.stats]]*t_scaler
+    t_total = np.r_[[r.t_total for r in xx.stats]]*t_scaler
+    t_read = t_total - t_open
+
+    return SimpleNamespace(chunk_size=chunk_size,
+                           t_open=t_open,
+                           t_read=t_read,
+                           t_total=t_total)
+
+
+def join_reports(s1, s2):
+    s1 = s1.split('\n')
+    s2 = s2.split('\n')
+
+    def trim(ss):
+        nmax = max(len(s) for s in ss if not s.startswith('--'))
+        ss = [s[:nmax] for s in ss]
+        return ss, nmax
+
+    s1, nmax1 = trim(s1)
+    s2, nmax2 = trim(s2)
+
+    fmt = "{:%d} | {}" % nmax1
+    ll = [fmt.format(a, b) for a, b in zip(s1, s2)]
+    ll = ['-'*len(l) if l.startswith('--') else l for l in ll]
+    return '\n'.join(ll)
+
+
+def gen_stats_report(xx, extra_msg=None):
 
     chunk_size = np.r_[[r.chunk_size for r in xx.stats]]
     t_open = np.r_[[r.t_open for r in xx.stats]]*1000
@@ -72,7 +117,9 @@ def gen_stats_report(xx):
 Tile: ({pp.tile[0]:d},{pp.tile[1]:d})@{pp.block[0]:d}_{pp.block[1]:d}#{pp.band:d}
    - blocks  : {pp.block_shape[0]:d}x{pp.block_shape[1]:d}@{pp.dtype}
    - nthreads: {pp.nthreads:d}
-'''.format(pp=xx.params).strip()
+{extra_msg}
+'''.format(pp=xx.params,
+           extra_msg='' if extra_msg is None else '   - ' + extra_msg).strip()
 
     return '''
 -------------------------------------------------------------
@@ -82,7 +129,7 @@ Tile: ({pp.tile[0]:d},{pp.tile[1]:d})@{pp.block[0]:d}_{pp.block[1]:d}#{pp.band:d
 Files read             : {:d}
 Total data bytes       : {:,d}
   (excluding headers)
-Bytes per chunk        : {:.0f} [{:d}..{:d}] bytes
+Bytes per chunk        : {:.0f} [{:d}..{:d}]
 
 Time:
  per tile:
@@ -182,6 +229,48 @@ def plot_stats_results(data, fig):
 
     fig.tight_layout()
     return best_idx
+
+
+def plot_comparison(fig, stats, names=None, threshs=None, colors=None):
+    if names is None:
+        names = ['A', 'B']
+
+    def linked_hist(data, axs, colors, msg, nb, thresh):
+        for d, ax, cc, name in zip(data, axs, colors, names):
+            add_hist(d, nb, ax=ax, thresh=thresh, alpha=0.3, color=cc)
+            ax.legend(['{} ({})'.format(msg, name)])
+            ax.axvline(d.mean(), color=cc, linewidth=3, alpha=0.7)
+            ax.yaxis.set_visible(False)
+
+        link_x_axis(*axs, start_from_zero=True)
+
+    if threshs is None:
+        threshs = [18000, 250, 100]
+
+    if colors is None:
+        colors = (('C0', 'C1'),
+                  ('C4', 'C3'),
+                  ('C9', 'C6'))
+
+    linked_hist([s.chunk_size for s in stats],
+                [fig.add_subplot(2, 3, i) for i in [1, 4]],
+                colors[0],
+                'Chunk Size',
+                30, threshs[0])
+
+    linked_hist([s.t_open for s in stats],
+                [fig.add_subplot(2, 3, i) for i in [2, 5]],
+                colors[1],
+                'Open',
+                30, threshs[1])
+
+    linked_hist([s.t_read for s in stats],
+                [fig.add_subplot(2, 3, i) for i in [3, 6]],
+                colors[2],
+                'Read',
+                30, threshs[2])
+
+    fig.tight_layout()
 
 
 def read_block_with_stats(uri, block, band=1, out=None):
