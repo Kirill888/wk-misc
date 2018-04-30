@@ -234,8 +234,6 @@ def hdr_from_bytes(buffer):
         raise ValueError('Not a TIFF header')
 
     n_tags, = struct.unpack_from(fmts['ifd'], buffer, offset)
-    print('Found {} tags @ offset {}'.format(n_tags, offset))
-
     tags = [struct.unpack_from(fmts['dir_entry'], buffer, offset + 2 + 12*i)
             for i in range(n_tags)]
 
