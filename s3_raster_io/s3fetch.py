@@ -134,6 +134,8 @@ class S3TiffReader(object):
         return out
 
     def read_chunk(self, urls, tile_idx, dst, hdr_max_sz=4096, submit_order=None):
+        t0 = t_now()
+
         stats = [None for _ in urls]
 
         def proc(idx, url):
@@ -149,4 +151,14 @@ class S3TiffReader(object):
         ngood = len(fut.wait(futures).done)
         assert ngood == len(futures)
 
-        return dst, stats
+        t1 = t_now()
+        params = SimpleNamespace(band=1,
+                                 block_shape=dst.shape[1:],
+                                 nthreads=self._nthreads,
+                                 hdr_max_sz=hdr_max_sz,
+                                 dtype=dst.dtype.name,
+                                 block=tile_idx)
+
+        return dst, SimpleNamespace(params=params,
+                                    t_total=t1 - t0,
+                                    stats=stats)
