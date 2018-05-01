@@ -8,6 +8,8 @@ from concurrent.futures import ThreadPoolExecutor
 import concurrent.futures as fut
 import numpy as np
 import sys
+from timeit import default_timer as t_now
+from types import SimpleNamespace
 
 from . import tifprobe
 
@@ -65,10 +67,12 @@ def tif_tile_idx(hdr, row, col):
 
 
 def tif_read_tile(url, tile_idx, hdr_max_sz=4096, s3=None, dtype=None):
+    t0 = t_now()
     if s3 is None:
         s3 = get_s3_client()
 
     hdr = tif_read_header(url, hdr_max_sz, s3=s3)
+    t1 = t_now()
 
     if not isinstance(tile_idx, int):
         tile_idx = tif_tile_idx(hdr, *tile_idx)
@@ -92,7 +96,13 @@ def tif_read_tile(url, tile_idx, hdr_max_sz=4096, s3=None, dtype=None):
     if hdr.byteorder != sys.byteorder:
         im.byteswap(inplace=True)
 
-    return hdr, im
+    t2 = t_now()
+
+    stats = SimpleNamespace(t_open=t1-t0,
+                            t_total=t2-t0,
+                            chunk_size=nbytes)
+
+    return hdr, im, stats
 
 
 class S3TiffReader(object):
@@ -124,11 +134,13 @@ class S3TiffReader(object):
         return out
 
     def read_chunk(self, urls, tile_idx, dst, hdr_max_sz=4096, submit_order=None):
+        stats = [None for _ in urls]
 
         def proc(idx, url):
-            _, im = tif_read_tile(url, tile_idx, hdr_max_sz=hdr_max_sz, dtype=dst.dtype)
+            _, im, st = tif_read_tile(url, tile_idx, hdr_max_sz=hdr_max_sz, dtype=dst.dtype)
             assert dst.shape[1:] == im.shape
             dst[idx, :, :] = im
+            stats[idx] = st
 
         if submit_order is None:
             submit_order = range(len(urls))
@@ -137,4 +149,4 @@ class S3TiffReader(object):
         ngood = len(fut.wait(futures).done)
         assert ngood == len(futures)
 
-        return dst
+        return dst, stats
