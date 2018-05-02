@@ -10,6 +10,7 @@ import numpy as np
 import sys
 from timeit import default_timer as t_now
 from types import SimpleNamespace
+import re
 
 from . import tifprobe
 
@@ -41,6 +42,48 @@ def s3_ls(url):
     for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
         for o in page['Contents']:
             yield o['Key'][n_skip:]
+
+
+def s3_fancy_ls(url, sort=True,
+                random_prefix_length=None,
+                absolute=False,
+                predicate=None):
+    """
+    predicate -- None| str -> Bool | regex string
+    random_prefix_length int -- number of characters to skip for sorting: fh4e6_0, ahfe8_1 ... 00aa3_9, if =6
+    """
+    def get_sorter():
+        if random_prefix_length is None:
+            return None
+        return lambda s: s[random_prefix_length:]
+
+    def normalise_predicate(predicate):
+        if predicate is None:
+            return None
+
+        if isinstance(predicate, str):
+            regex = re.compile(predicate)
+            return lambda s: regex.match(s) is not None
+
+        return predicate
+
+    predicate = normalise_predicate(predicate)
+
+    if url[-1] != '/':
+        url += '/'
+
+    names = s3_ls(url)
+
+    if predicate:
+        names = [n for n in names if predicate(n)]
+
+    if sort:
+        names = sorted(names, key=get_sorter())
+
+    if absolute:
+        names = [url+name for name in names]
+
+    return names
 
 
 def get_byte_range(url, start, stop, s3):
