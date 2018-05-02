@@ -333,12 +333,16 @@ def update_params(pp, **kwargs):
     return pp
 
 
-def process_bunch(files, pp, **kwargs):
+def process_bunch(files, pp, pool=None, **kwargs):
     from timeit import default_timer as t_now
 
     pp = update_params(pp, **kwargs)
 
     single_threaded = pp.nthreads == 1
+
+    if pool is None and not single_threaded:
+        pool = fut.ThreadPoolExecutor(max_workers=pp.nthreads)
+
     dd, proc = mk_proc(files, pp, verbose=single_threaded)
 
     t0 = t_now()
@@ -346,7 +350,6 @@ def process_bunch(files, pp, **kwargs):
     if single_threaded:
         rr = [proc(f, i) for i, f in enumerate(files)]
     else:
-        pool = fut.ThreadPoolExecutor(max_workers=pp.nthreads)
         futures = [pool.submit(proc, fname, idx)
                    for idx, fname in enumerate(files)]
 
@@ -386,6 +389,8 @@ def run_main(file_list_file, nthreads, prefix='MXL5'):
                          nthreads=nthreads,
                          band=1)
 
+    pool = fut.ProcessPoolExecutor(max_workers=pp.nthreads)
+
     print('''Files:
 {}
  ...
@@ -397,7 +402,7 @@ def run_main(file_list_file, nthreads, prefix='MXL5'):
                len(files),
                pp.nthreads))
 
-    xx = process_bunch(files, pp)
+    xx = process_bunch(files, pp, pool=pool)
 
     fnames = {ext: mk_fname(xx.params, ext=ext, prefix=prefix)
               for ext in ['pickle', 'npz']}
