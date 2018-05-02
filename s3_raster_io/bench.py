@@ -34,6 +34,14 @@ def mk_fname(params, ext='pickle', prefix=None):
     return find_next_available_file(fmt)
 
 
+def slurp_lines(fname, *args, **kwargs):
+    if len(args) > 0 or len(kwargs) > 0:
+        fname = fname.format(*args, **kwargs)
+
+    with open(fname, 'rt') as f:
+        return [s.rstrip() for s in f.readlines()]
+
+
 def npz_data_hash(fname, varname=None):
     def digest(a):
         return hashlib.sha256(a.tobytes('C')).hexdigest()
@@ -369,8 +377,7 @@ def run_main(file_list_file, nthreads, prefix='MXL5'):
 
     nthreads = int(nthreads)
 
-    with open(file_list_file, 'r') as f:
-        files = [s.rstrip() for s in f.readlines()]
+    files = slurp_lines(file_list_file)
 
     pp = SimpleNamespace(tile=(-9, -18),  # TODO: extract from file name?
                          block=(8, 2),
