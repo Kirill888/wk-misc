@@ -389,7 +389,7 @@ def run_main(file_list_file, nthreads, prefix='MXL5'):
                          nthreads=nthreads,
                          band=1)
 
-    pool = fut.ProcessPoolExecutor(max_workers=pp.nthreads)
+    pool = fut.ThreadPoolExecutor(max_workers=pp.nthreads)
 
     print('''Files:
 {}
