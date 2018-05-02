@@ -11,7 +11,7 @@ import sys
 from timeit import default_timer as t_now
 from types import SimpleNamespace
 import re
-import tifprobe
+from . import tifprobe
 
 _thread_lcl = threading.local()
 

@@ -4,7 +4,7 @@ import rasterio
 import hashlib
 from types import SimpleNamespace
 import concurrent.futures as fut
-import s3fetch
+from . import s3fetch
 
 
 def find_next_available_file(fname_pattern, max_n=1000, start=1):
@@ -452,8 +452,3 @@ def main(args=None):
         return 1
 
     return run_main(*args)
-
-
-if __name__ == '__main__':
-    import sys
-    sys.exit(main())
