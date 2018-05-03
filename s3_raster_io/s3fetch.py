@@ -4,14 +4,13 @@ from urllib.parse import urlparse
 import threading
 import math
 import zlib
-from concurrent.futures import ThreadPoolExecutor
-import concurrent.futures as fut
 import numpy as np
 import sys
 from timeit import default_timer as t_now
 from types import SimpleNamespace
 import re
 from . import tifprobe
+from .parallel import ParallelStreamProc
 
 _thread_lcl = threading.local()
 
@@ -148,50 +147,54 @@ def tif_read_tile(url, tile_idx, hdr_max_sz=4096, s3=None, dtype=None):
 
 
 class S3TiffReader(object):
-    def __init__(self, nthreads, region_name='ap-southeast-2'):
-        self._region_name = region_name
-        self._nthreads = nthreads
-        self._pool = ThreadPoolExecutor(max_workers=nthreads)
 
-    def warmup(self):
-        def proc():
-            return get_s3_client(self._region_name)
+    @staticmethod
+    def header_stream_proc(src_stream, out, hdr_max_sz):
+        s3 = get_s3_client()
 
-        fut.wait([self._pool.submit(proc) for _ in range(self._nthreads)])
-
-    def read_headers(self, urls, hdr_max_sz=4096):
-        out = [None for u in urls]
-
-        def proc(idx, url):
-            s3 = get_s3_client()
+        for idx, url in src_stream:
             bb = get_byte_range(url, 0, hdr_max_sz, s3)
             hdr = tifprobe.hdr_from_bytes(bb)
             out[idx] = hdr
-            return idx, True
 
-        futures = [self._pool.submit(proc, idx, url) for idx, url in enumerate(urls)]
-        ngood = len(fut.wait(futures).done)
-        assert ngood == len(urls)
+    @staticmethod
+    def tile_stream_proc(src_stream, tile_idx, dst, stats, hdr_max_sz):
+        s3 = get_s3_client()
 
-        return out
-
-    def read_chunk(self, urls, tile_idx, dst, hdr_max_sz=4096, submit_order=None):
-        t0 = t_now()
-
-        stats = [None for _ in urls]
-
-        def proc(idx, url):
-            _, im, st = tif_read_tile(url, tile_idx, hdr_max_sz=hdr_max_sz, dtype=dst.dtype)
+        for idx, url in src_stream:
+            _, im, st = tif_read_tile(url, tile_idx, hdr_max_sz=hdr_max_sz, dtype=dst.dtype, s3=s3)
             assert dst.shape[1:] == im.shape
             dst[idx, :, :] = im
             stats[idx] = st
 
-        if submit_order is None:
-            submit_order = range(len(urls))
+    def __init__(self, nthreads, region_name='ap-southeast-2'):
+        self._region_name = region_name
+        self._nthreads = nthreads
+        self._pstream = ParallelStreamProc(nthreads)
 
-        futures = [self._pool.submit(proc, idx, urls[idx]) for idx in submit_order]
-        ngood = len(fut.wait(futures).done)
-        assert ngood == len(futures)
+        self._rdr_header = self._pstream.bind(S3TiffReader.header_stream_proc)
+        self._rdr_tile = self._pstream.bind(S3TiffReader.tile_stream_proc)
+
+    def warmup(self):
+        def proc(src_stream):
+            s3 = get_s3_client(self._region_name)
+            for _ in src_stream:
+                pass
+            return s3
+
+        pp = self._pstream.bind(proc)
+        pp(range(self._nthreads*2))
+
+    def read_headers(self, urls, hdr_max_sz=4096):
+        out = [None for u in urls]
+        self._rdr_header(urls, out, hdr_max_sz)
+        return out
+
+    def read_chunk(self, urls, tile_idx, dst, hdr_max_sz=4096):
+        t0 = t_now()
+        stats = [None for _ in urls]
+
+        self._rdr_tile(urls, tile_idx, dst, stats, hdr_max_sz=hdr_max_sz)
 
         t1 = t_now()
         params = SimpleNamespace(band=1,
