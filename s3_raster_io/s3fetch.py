@@ -187,14 +187,14 @@ class S3TiffReader(object):
 
     def read_headers(self, urls, hdr_max_sz=4096):
         out = [None for u in urls]
-        self._rdr_header(urls, out, hdr_max_sz)
+        self._rdr_header(enumerate(urls), out, hdr_max_sz)
         return out
 
     def read_chunk(self, urls, tile_idx, dst, hdr_max_sz=4096):
         t0 = t_now()
         stats = [None for _ in urls]
 
-        self._rdr_tile(urls, tile_idx, dst, stats, hdr_max_sz=hdr_max_sz)
+        self._rdr_tile(enumerate(urls), tile_idx, dst, stats, hdr_max_sz=hdr_max_sz)
 
         t1 = t_now()
         params = SimpleNamespace(band=1,
