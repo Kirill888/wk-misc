@@ -15,13 +15,17 @@ from .parallel import ParallelStreamProc
 _thread_lcl = threading.local()
 
 
-def get_s3_client(region_name='ap-southeast-2', max_pool_connections=32):
+def get_s3_client(region_name='ap-southeast-2',
+                  max_pool_connections=32,
+                  use_ssl=True):
     s3 = getattr(_thread_lcl, 's3', None)
     if s3 is None:
+        protocol = 'https' if use_ssl else 'http'
         session = botocore.session.get_session()
 
         s3 = session.create_client('s3',
                                    region_name=region_name,
+                                   endpoint_url='{}://s3.{}.amazonaws.com'.format(protocol, region_name),
                                    config=botocore.client.Config(max_pool_connections=max_pool_connections))
         setattr(_thread_lcl, 's3', s3)
     return s3
@@ -167,8 +171,11 @@ class S3TiffReader(object):
             dst[idx, :, :] = im
             stats[idx] = st
 
-    def __init__(self, nthreads, region_name='ap-southeast-2'):
+    def __init__(self, nthreads,
+                 region_name='ap-southeast-2',
+                 use_ssl=True):
         self._region_name = region_name
+        self._use_ssl = use_ssl
         self._nthreads = nthreads
         self._pstream = ParallelStreamProc(nthreads)
 
@@ -176,14 +183,7 @@ class S3TiffReader(object):
         self._rdr_tile = self._pstream.bind(S3TiffReader.tile_stream_proc)
 
     def warmup(self):
-        def proc(src_stream):
-            s3 = get_s3_client(self._region_name)
-            for _ in src_stream:
-                pass
-            return s3
-
-        pp = self._pstream.bind(proc)
-        pp(range(self._nthreads*2))
+        self._pstream.broadcast(lambda: get_s3_client(self._region_name, use_ssl=self._use_ssl))
 
     def read_headers(self, urls, hdr_max_sz=4096):
         out = [None for u in urls]
