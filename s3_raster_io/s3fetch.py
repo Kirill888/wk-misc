@@ -108,12 +108,12 @@ def tif_read_header(url, hdr_max_sz, s3=None):
 
 
 def tif_tile_idx(hdr, row, col):
-    # TODO: check image has tiling info and tile_idx is valid
+    # TODO: check image has tiling info and idx is valid
     n_tiles_across = math.ceil(hdr.info.ImageWidth/hdr.info.TileWidth)
     return row*n_tiles_across + col
 
 
-def tif_read_tile(url, tile_idx, hdr_max_sz=4096, s3=None, dtype=None):
+def tif_read_block(url, block_idx, hdr_max_sz=4096, s3=None, dtype=None):
     t0 = t_now()
     if s3 is None:
         s3 = get_s3_client()
@@ -121,16 +121,16 @@ def tif_read_tile(url, tile_idx, hdr_max_sz=4096, s3=None, dtype=None):
     hdr = tif_read_header(url, hdr_max_sz, s3=s3)
     t1 = t_now()
 
-    if not isinstance(tile_idx, int):
-        tile_idx = tif_tile_idx(hdr, *tile_idx)
+    if not isinstance(block_idx, int):
+        block_idx = tif_tile_idx(hdr, *block_idx)
 
     if hdr.info.Compression not in (8, 0x80B2):
         raise ValueError('Only support DEFLATE compression (for now)')
     if hdr.info.Predictor not in (1,):
         raise ValueError('Do not support horizontal differencing predictor (for now)')
 
-    offset = hdr.info.TileOffsets[tile_idx]
-    nbytes = hdr.info.TileByteCounts[tile_idx]
+    offset = hdr.info.TileOffsets[block_idx]
+    nbytes = hdr.info.TileByteCounts[block_idx]
 
     bb = get_byte_range(url, offset, offset + nbytes, s3=s3)
     bb = zlib.decompress(bb)
@@ -218,11 +218,11 @@ class S3TiffReader(object):
             out[idx] = hdr
 
     @staticmethod
-    def tile_stream_proc(src_stream, tile_idx, dst, stats, hdr_max_sz):
+    def block_stream_proc(src_stream, block_idx, dst, stats, hdr_max_sz):
         s3 = get_s3_client()
 
         for idx, url in src_stream:
-            _, im, st = tif_read_tile(url, tile_idx, hdr_max_sz=hdr_max_sz, dtype=dst.dtype, s3=s3)
+            _, im, st = tif_read_block(url, block_idx, hdr_max_sz=hdr_max_sz, dtype=dst.dtype, s3=s3)
             assert dst.shape[1:] == im.shape
             dst[idx, :, :] = im
             stats[idx] = st
@@ -236,7 +236,7 @@ class S3TiffReader(object):
         self._pstream = ParallelStreamProc(nthreads)
 
         self._rdr_header = self._pstream.bind(S3TiffReader.header_stream_proc)
-        self._rdr_tile = self._pstream.bind(S3TiffReader.tile_stream_proc)
+        self._rdr_block = self._pstream.bind(S3TiffReader.block_stream_proc)
 
     def warmup(self):
         self._pstream.broadcast(lambda: get_s3_client(self._region_name, use_ssl=self._use_ssl))
@@ -246,11 +246,11 @@ class S3TiffReader(object):
         self._rdr_header(enumerate(urls), out, hdr_max_sz)
         return out
 
-    def read_chunk(self, urls, tile_idx, dst, hdr_max_sz=4096):
+    def read_blocks(self, urls, block_idx, dst, hdr_max_sz=4096):
         t0 = t_now()
         stats = [None for _ in urls]
 
-        self._rdr_tile(enumerate(urls), tile_idx, dst, stats, hdr_max_sz=hdr_max_sz)
+        self._rdr_block(enumerate(urls), block_idx, dst, stats, hdr_max_sz=hdr_max_sz)
 
         t1 = t_now()
         params = SimpleNamespace(band=1,
@@ -258,7 +258,7 @@ class S3TiffReader(object):
                                  nthreads=self._nthreads,
                                  hdr_max_sz=hdr_max_sz,
                                  dtype=dst.dtype.name,
-                                 block=tile_idx)
+                                 block=block_idx)
 
         return dst, SimpleNamespace(params=params,
                                     t0=t0,
