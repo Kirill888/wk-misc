@@ -147,6 +147,7 @@ def tif_read_tile(url, tile_idx, hdr_max_sz=4096, s3=None, dtype=None):
 
     stats = SimpleNamespace(t_open=t1-t0,
                             t_total=t2-t0,
+                            t0=t0,
                             chunk_size=nbytes)
 
     return hdr, im, stats
@@ -260,5 +261,6 @@ class S3TiffReader(object):
                                  block=tile_idx)
 
         return dst, SimpleNamespace(params=params,
+                                    t0=t0,
                                     t_total=t1 - t0,
                                     stats=stats)
