@@ -22,6 +22,16 @@ class ParallelHTTPGetter(object):
         for _ in range(nconnections):
             self._connection_pool.put(Conn(host, port=port, **kwargs))
 
+    def connect(self):
+        cc = []
+        while self._connection_pool.qsize():
+            c = self._connection_pool.get()
+            c.connect()
+            cc.append(c)
+
+        for c in cc:
+            self._connection_pool.put(c)
+
     def fetch(self, requests, on_data, on_error=None):
         """
         : requests: Stream of (userdata, request) tuples
