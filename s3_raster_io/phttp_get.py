@@ -67,7 +67,15 @@ class ParallelHTTPGetter(object):
 
         def stage2(stream, connection_pool):
             for userdata, req, conn, t0 in stream:
-                response = conn.getresponse()
+                try:
+                    response = conn.getresponse()
+                except IOError as e:
+                    # TODO:
+                    print(e)
+                    if on_error:
+                        on_error(e)
+                    continue
+
                 t1 = t_now()
 
                 if 200 <= response.code < 300:
