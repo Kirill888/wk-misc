@@ -72,11 +72,12 @@ def p_fetch(stream, on_data, nconnections=64, loop=None):
             t2 = t_now()
             on_data(data, userdata, time=(t0, t1, t2))
 
-    async def fetch_all(reqs, on_data, nconnections):
+    async def fetch_all(reqs, on_data, nconnections, loop=loop):
         tcp_connector = aiohttp.TCPConnector(limit=nconnections,
+                                             loop=loop,
                                              limit_per_host=nconnections)
 
-        async with aiohttp.ClientSession(connector=tcp_connector) as session:
+        async with aiohttp.ClientSession(loop=loop, connector=tcp_connector) as session:
             return await process_stream(reqs, nconnections, lambda x: fetch_one(x[1], session, x[0]))
 
     is_loop_mine = loop is None
@@ -84,7 +85,7 @@ def p_fetch(stream, on_data, nconnections=64, loop=None):
     if loop is None:
         loop = asyncio.new_event_loop()
 
-    loop.run_until_complete(fetch_all(stream, on_data, nconnections))
+    loop.run_until_complete(fetch_all(stream, on_data, nconnections, loop=loop))
 
     if is_loop_mine:
         loop.close()
