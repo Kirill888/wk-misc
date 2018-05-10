@@ -4,7 +4,7 @@ import itertools
 EOS_MARKER = object()
 
 
-async def process_stream(stream, nworkers, async_proc):
+async def process_stream(stream, nworkers, async_proc, loop=None):
     """This is equivalent to a synchronous `map`, but with limited concurrency, stream
     will run upto nworkers concurrently.
 
@@ -13,7 +13,6 @@ async def process_stream(stream, nworkers, async_proc):
          async_proc(x)
     ```
     """
-
     async def process_q(q, async_proc):
         while True:
             x = await q.get()
@@ -29,9 +28,9 @@ async def process_stream(stream, nworkers, async_proc):
             await q.put(x)
         await q.join()
 
-    q = asyncio.Queue(nworkers*2)
+    q = asyncio.Queue(nworkers*2, loop=loop)
     for _ in range(nworkers):
-        asyncio.ensure_future(process_q(q, async_proc))
+        asyncio.ensure_future(process_q(q, async_proc), loop=loop)
 
     return await feed_q(stream, q, nworkers)
 
@@ -44,7 +43,7 @@ def async_process(stream,
     if loop is None:
         loop = asyncio.get_event_loop()
 
-    loop.run_until_complete(process_stream(stream, nworkers, async_proc))
+    loop.run_until_complete(process_stream(stream, nworkers, async_proc, loop=loop))
 
 
 def p_fetch(stream, on_data, nconnections=64, loop=None):
@@ -78,7 +77,7 @@ def p_fetch(stream, on_data, nconnections=64, loop=None):
                                              limit_per_host=nconnections)
 
         async with aiohttp.ClientSession(loop=loop, connector=tcp_connector) as session:
-            return await process_stream(reqs, nconnections, lambda x: fetch_one(x[1], session, x[0]))
+            return await process_stream(reqs, nconnections, lambda x: fetch_one(x[1], session, x[0]), loop=loop)
 
     is_loop_mine = loop is None
 
