@@ -1,5 +1,3 @@
-import botocore
-import botocore.session
 from urllib.parse import urlparse
 import threading
 import math
@@ -8,86 +6,23 @@ import numpy as np
 import sys
 from timeit import default_timer as t_now
 from types import SimpleNamespace
-import re
 from . import tifprobe
 from .parallel import ParallelStreamProc
+from .s3tools import make_s3_client
 
 _thread_lcl = threading.local()
 
 
-def get_s3_client(region_name='ap-southeast-2',
+def get_s3_client(region_name=None,
                   max_pool_connections=32,
                   use_ssl=True):
     s3 = getattr(_thread_lcl, 's3', None)
     if s3 is None:
-        protocol = 'https' if use_ssl else 'http'
-        session = botocore.session.get_session()
-
-        s3 = session.create_client('s3',
-                                   region_name=region_name,
-                                   endpoint_url='{}://s3.{}.amazonaws.com'.format(protocol, region_name),
-                                   config=botocore.client.Config(max_pool_connections=max_pool_connections))
+        s3 = make_s3_client(region_name,
+                            max_pool_connections=max_pool_connections,
+                            use_ssl=use_ssl)
         setattr(_thread_lcl, 's3', s3)
     return s3
-
-
-def s3_url_parse(url):
-    uu = urlparse(url)
-    return uu.netloc, uu.path.lstrip('/')
-
-
-def s3_ls(url):
-    bucket, prefix = s3_url_parse(url)
-
-    s3 = get_s3_client()
-    paginator = s3.get_paginator('list_objects')
-
-    n_skip = len(prefix)
-    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
-        for o in page['Contents']:
-            yield o['Key'][n_skip:]
-
-
-def s3_fancy_ls(url, sort=True,
-                random_prefix_length=None,
-                absolute=False,
-                predicate=None):
-    """
-    predicate -- None| str -> Bool | regex string
-    random_prefix_length int -- number of characters to skip for sorting: fh4e6_0, ahfe8_1 ... 00aa3_9, if =6
-    """
-    def get_sorter():
-        if random_prefix_length is None:
-            return None
-        return lambda s: s[random_prefix_length:]
-
-    def normalise_predicate(predicate):
-        if predicate is None:
-            return None
-
-        if isinstance(predicate, str):
-            regex = re.compile(predicate)
-            return lambda s: regex.match(s) is not None
-
-        return predicate
-
-    predicate = normalise_predicate(predicate)
-
-    if url[-1] != '/':
-        url += '/'
-
-    names = s3_ls(url)
-
-    if predicate:
-        names = [n for n in names if predicate(n)]
-
-    if sort:
-        names = sorted(names, key=get_sorter())
-
-    if absolute:
-        names = [url+name for name in names]
-
-    return names
 
 
 def get_byte_range(url, start, stop, s3):
@@ -151,59 +86,6 @@ def tif_read_block(url, block_idx, hdr_max_sz=4096, s3=None, dtype=None):
                             chunk_size=nbytes)
 
     return hdr, im, stats
-
-
-def s3_get_object_request_maker(region_name=None, credentials=None, ssl=True):
-    from botocore.session import get_session
-    from botocore.auth import S3SigV4Auth
-    from botocore.awsrequest import AWSRequest
-    from urllib.request import Request
-
-    session = get_session()
-
-    if region_name is None:
-        region_name = session.get_config_variable('region')
-
-    if region_name is None:
-        raise ValueError('Region name is not supplied and no default is configured')
-
-    if credentials is None:
-        credentials = session.get_credentials().get_frozen_credentials()
-
-    protocol = 'https' if ssl else 'http'
-    auth = S3SigV4Auth(credentials, 's3', region_name)
-
-    def build_request(bucket=None,
-                      key=None,
-                      url=None,
-                      Range=None):
-        if key is None and url is None:
-            if bucket is None:
-                raise ValueError('Have to supply bucket,key or url')
-            # assume bucket is url
-            url = bucket
-
-        if url is not None:
-            bucket, key = s3_url_parse(url)
-
-        if isinstance(Range, (tuple, list)):
-            Range = 'bytes={}-{}'.format(Range[0], Range[1]-1)
-
-        headers = {}
-        if Range is not None:
-            headers['Range'] = Range
-
-        req = AWSRequest(method='GET',
-                         url='{}://s3.{}.amazonaws.com/{}/{}'.format(protocol, region_name, bucket, key),
-                         headers=headers)
-
-        auth.add_auth(req)
-
-        return Request(req.url,
-                       headers=dict(**req.headers),
-                       method='GET')
-
-    return build_request
 
 
 class S3TiffReader(object):

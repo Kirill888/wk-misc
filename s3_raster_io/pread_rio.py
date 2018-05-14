@@ -2,7 +2,7 @@ from timeit import default_timer as t_now
 import rasterio
 from types import SimpleNamespace
 import threading
-import boto3
+from .s3tools import auto_find_region, get_boto3_session
 from .parallel import ParallelStreamProc
 
 __all__ = ["PReadRIO", "PReadRIO_bench"]
@@ -10,57 +10,8 @@ __all__ = ["PReadRIO", "PReadRIO_bench"]
 _thread_lcl = threading.local()
 
 
-def ec2_metadata(timeout=0.1):
-    import requests
-    try:
-        with requests.get('http://169.254.169.254/latest/dynamic/instance-identity/document', timeout=timeout) as resp:
-            if resp.ok:
-                return resp.json()
-            return None
-    except IOError:
-        return None
-
-
-def ec2_current_region():
-    cfg = ec2_metadata()
-    if cfg is None:
-        return None
-    return cfg.get('region', None)
-
-
-def botocore_default_region():
-    import botocore.session
-    return botocore.session.get_session().get_config_variable('region')
-
-
-def auto_find_region():
-    region_name = ec2_current_region()
-
-    if region_name is None:
-        region_name = botocore_default_region()
-
-    if region_name is None:
-        raise ValueError('Region name is not supplied and default can not be found')
-
-    return region_name
-
-
-def get_boto3_session(region_name=None):
-    if region_name is None:
-        region_name = ec2_current_region()
-
-    sessions = getattr(_thread_lcl, 'sessions', None)
-    if sessions is None:
-        sessions = {}
-        setattr(_thread_lcl, 'sessions', sessions)
-
-    session = sessions.get(region_name)
-
-    if session is None:
-        session = boto3.Session(region_name=region_name)
-        sessions[region_name] = session
-
-    return session
+def _session(region_name=None):
+    return get_boto3_session(region_name, cache=_thread_lcl)
 
 
 class PReadRIO(object):
@@ -93,7 +44,7 @@ class PReadRIO(object):
                              gdal_opts=None,
                              region_name=None,
                              timer=None):
-        session = get_boto3_session(region_name)
+        session = _session(region_name)
 
         if timer is not None:
             def proc(url, userdata):
@@ -131,7 +82,7 @@ class PReadRIO(object):
         callback that will be called once in every worker thread.
         """
         def _warmup():
-            session = get_boto3_session(region_name=self._region_name)
+            session = _session(region_name=self._region_name)
             with rasterio.Env(session=session, **self._gdal_opts):
                 if action:
                     action()
