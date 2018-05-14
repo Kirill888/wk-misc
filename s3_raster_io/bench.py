@@ -4,7 +4,7 @@ import numpy as np
 import hashlib
 from types import SimpleNamespace
 from . import s3fetch
-from . import pread_rio
+from . import pprio_bench
 
 
 def find_next_available_file(fname_pattern, max_n=1000, start=1):
@@ -445,7 +445,7 @@ def run_main(file_list_file, nthreads,
                pp.nthreads,
                mode))
 
-    procs = {'rio': pread_rio.PReadRIO_bench,
+    procs = {'rio': pprio_bench.PReadRIO_bench,
              's3tif': s3fetch.S3TiffReader}
 
     if mode not in procs:

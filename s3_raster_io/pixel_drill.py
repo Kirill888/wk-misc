@@ -1,4 +1,4 @@
-from .pread_rio import PReadRIO
+from .pprio import ParallelReader
 
 
 def make_pixel_extractor(mode='pixel',
@@ -59,8 +59,8 @@ class PixelDrill(object):
     def __init__(self,
                  nthreads,
                  region_name=None):
-        self._proc = PReadRIO(nthreads,
-                              region_name=region_name)
+        self._proc = ParallelReader(nthreads,
+                                    region_name=region_name)
 
     def read(self, urls, pixel=None, xy=None, band=1, **kwargs):
         if pixel is None and xy is None:
