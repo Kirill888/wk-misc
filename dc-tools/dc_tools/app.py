@@ -107,7 +107,7 @@ AND dataset_location.archived is NULL
         else:
             uri = f.uri
 
-        print('{f.product:>16s}, {f.cell[0]:3d}, {f.cell[1]:3d}, {n:4d}, {uri}'.format(f=f, uri=uri, n=len(f.datasets)))
+        print('{f.product:>16s} {f.cell[0]:3d} {f.cell[1]:3d} {n:4d} {uri}'.format(f=f, uri=uri, n=len(f.datasets)))
 
 
 ####################################################################
