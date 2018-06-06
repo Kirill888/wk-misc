@@ -104,8 +104,10 @@ cli = click.Group(name='dctools', help="")
               type=str,
               default='datacube',
               help='Database name')
+@click.option('--stacked-only', is_flag=True, default=False,
+              help="Only print files referenced by more than one dataset")
 @click.argument('product')
-def files(host, port, user, dbname, product):
+def files(host, port, user, dbname, product, stacked_only):
     """ List files belonging to a product
     """
     if len(host) == 0:
@@ -123,6 +125,9 @@ def files(host, port, user, dbname, product):
                 sys.stderr.flush()
 
         for f in proc():
+            if stacked_only and len(f.datasets) < 2:
+                continue
+
             uri = urlparse(f.uri)
             if uri.scheme == 'file':
                 uri = uri.path
