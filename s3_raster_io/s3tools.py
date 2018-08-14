@@ -75,6 +75,23 @@ def s3_ls(url, s3=None):
             yield o['Key'][n_skip:]
 
 
+def s3_ls_dir(uri, s3=None):
+    bucket, prefix = s3_url_parse(uri)
+    prefix = prefix.rstrip('/') + '/'
+
+    s3 = s3 or make_s3_client()
+    paginator = s3.get_paginator('list_objects_v2')
+
+    for page in paginator.paginate(Bucket=bucket,
+                                   Prefix=prefix,
+                                   Delimiter='/'):
+        if 'CommonPrefixes' not in page:
+            raise ValueError('No such path: ' + uri)
+
+        for p in page['CommonPrefixes']:
+            yield 's3://{bucket}/{path}'.format(bucket=bucket, path=p['Prefix'])
+
+
 def s3_fancy_ls(url, sort=True,
                 random_prefix_length=None,
                 absolute=False,
