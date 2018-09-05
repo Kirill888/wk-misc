@@ -1,3 +1,8 @@
+---
+title: DEA Metadata Problems and Solutions
+author: Kirill Kouzoubov
+...
+
 ## Current State of Spatial Metadata
 
 This is a sample from current public docs
