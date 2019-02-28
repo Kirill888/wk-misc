@@ -113,4 +113,4 @@ def rio_getenv(client, sanitize=True):
         :param sanitize: If True replace sensitive Values with 'x'
     """
     from ._rio import get_rio_env
-    return pool_broadcast(client, get_rio_env, sanitize=True)
+    return pool_broadcast(client, get_rio_env, sanitize=sanitize)
