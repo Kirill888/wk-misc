@@ -1,6 +1,7 @@
 import xarray as xr
 from pathlib import Path
 from dask import array as da
+from jinja2 import Template
 
 from datacube.storage.masking import make_mask
 from datacube import Datacube
@@ -8,6 +9,34 @@ from datacube.utils.geometry import CRS
 from datacube.model import GridSpec
 from datacube.utils.rio import set_default_rio_config
 from ._cog import write_cog
+from odc.index import odc_uuid
+
+yaml_doc_tpl = Template('''$schema: https://schemas.opendatacube.org/dataset
+
+id: {{uuid}}
+product:
+  name: ls_usgs_wofs_summary
+
+crs: epsg:{{epsg}}
+
+grids:
+  default:
+    shape: [{{width}}, {{height}}]
+    transform: {{transform}}
+
+properties:
+  datetime: {{year}}-01-01 00:00:00.000
+  dtr:start_datetime: {{year}}-01-01 00:00:00.000
+  dtr:end_datetime: {{year}}-12-31 23:59:59.999
+
+measurements:
+  count_wet:
+    path: WOFS_{{epsg}}_{{tx}}_{{ty}}_{{year}}_summary_count_wet.tif
+  count_dry:
+    path: WOFS_{{epsg}}_{{tx}}_{{ty}}_{{year}}_summary_count_dry.tif
+  frequency:
+    path: WOFS_{{epsg}}_{{tx}}_{{ty}}_{{year}}_summary_frequency.tif
+''')
 
 
 def worker_setup():
@@ -43,6 +72,35 @@ def mk_africa_albers_gs(pixels_per_cell=5000, pix_sz=30):
                     origin=(0, 0))
 
 
+def gs_uniq_string(gs):
+    fmt = ":".join(["{:d}"]*7)
+    nn = (gs.crs.epsg,) + gs.resolution + gs.tile_resolution + gs.alignment
+    return fmt.format(*nn)
+
+
+def mk_yaml(tidx, year, grid_spec,
+            transform_precision=0,
+            **tags):
+    transform_fmt = '[{:.{n}f},{:.{n}f},{:.{n}f},  {:.{n}f},{:.{n}f},{:.{n}f},  {:.0f},{:.0f},{:.0f}]'
+    tx, ty = tidx
+    gbox = grid_spec.tile_geobox(tidx)
+    height, width = gbox.shape
+    epsg = gbox.crs.epsg
+
+    _id = odc_uuid('wofs_summary',
+                   algorithm_version='1',
+                   sources=[],
+                   # extra tags
+                   period='annual',
+                   grid=gs_uniq_string(grid_spec),
+                   tx=tx, ty=ty, year=year, **tags)
+    transform = transform_fmt.format(*gbox.transform, n=transform_precision)
+
+    return yaml_doc_tpl.render(uuid=str(_id),
+                               epsg=epsg, year=year, tx=tx, ty=ty,
+                               width=width, height=height, transform=transform)
+
+
 def wofs_stats(xx):
     attrs = {'crs': xx.crs}
 
@@ -65,9 +123,12 @@ def do_annual_wofs_stats(tidx,
                          year,
                          output_dir,
                          env=None,
+                         dc=None,
                          grid=None,
+                         zlevel=6,
                          datasets=None):
     fname_fmt = "WOFS_{epsg}_{tx:d}_{ty:d}_{year:d}_summary_{band}.tif"
+    yml_fmt = "WOFS_{epsg}_{tx:d}_{ty:d}_{year:d}_summary.yaml"
 
     if grid is None:
         grid = mk_africa_albers_gs()
@@ -75,7 +136,8 @@ def do_annual_wofs_stats(tidx,
     if not isinstance(output_dir, Path):
         output_dir = Path(output_dir)
 
-    dc = Datacube(env=env)
+    if dc is None:
+        dc = Datacube(env=env)
 
     geobox = grid.tile_geobox(tidx)
     query = dict(
@@ -96,13 +158,17 @@ def do_annual_wofs_stats(tidx,
     cog_opts = dict(overview_resampling='average',
                     overview_levels=[4, 8, 16],
                     predictor=2,  # force it even for float32, seems to work better
-                    zlevel=6)
+                    zlevel=zlevel)
 
     tx, ty = tidx
     fmt_opts = dict(epsg=geobox.crs.epsg,
                     tx=tx,
                     ty=ty,
                     year=year)
+
+    yml_fname = yml_fmt.format(**fmt_opts)
+    with open(yml_fname, 'wt') as out:
+        out.write(mk_yaml(tidx, year, grid))
 
     for band in ww.data_vars:
         file_name = fname_fmt.format(**fmt_opts, band=band)

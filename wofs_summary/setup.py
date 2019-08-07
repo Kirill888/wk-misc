@@ -16,9 +16,16 @@ setup(
     install_requires=[
         'distributed',
         'click',
-        'datacube'
+        'rasterio',
+        'datacube',
+        'odc_index',
     ],
 
     packages=['kk.wofs_summary'],
     zip_safe=False,
+    entry_points={
+        'console_scripts': [
+            'wws = kk.wofs_summary._cli:cli',
+        ]
+    },
 )
