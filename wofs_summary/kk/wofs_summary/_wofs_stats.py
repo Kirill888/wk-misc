@@ -169,7 +169,7 @@ def do_annual_wofs_stats(tidx,
                     year=year)
 
     yml_fname = yml_fmt.format(**fmt_opts)
-    with open(yml_fname, 'wt') as out:
+    with open(output_dir/yml_fname, 'wt') as out:
         out.write(mk_yaml(tidx, year, grid))
 
     for band in ww.data_vars:
