@@ -24,11 +24,6 @@ grids:
     shape: [{{width}}, {{height}}]
     transform: {{transform}}
 
-properties:
-  datetime: {{year}}-01-01 00:00:00.000
-  dtr:start_datetime: {{year}}-01-01 00:00:00.000
-  dtr:end_datetime: {{year}}-12-31 23:59:59.999
-
 measurements:
   count_wet:
     path: WOFS_{{epsg}}_{{tx}}_{{ty}}_{{year}}_summary_count_wet.tif
@@ -36,6 +31,13 @@ measurements:
     path: WOFS_{{epsg}}_{{tx}}_{{ty}}_{{year}}_summary_count_dry.tif
   frequency:
     path: WOFS_{{epsg}}_{{tx}}_{{ty}}_{{year}}_summary_frequency.tif
+
+properties:
+  datetime: {{year}}-01-01 00:00:00.000
+  dtr:start_datetime: {{year}}-01-01 00:00:00.000
+  dtr:end_datetime: {{year}}-12-31 23:59:59.999
+  odc:file_format: GeoTIFF
+  odc:region_code: {{ "%+04d"%tx}}{{"%+04d"%ty}}
 ''')
 
 
