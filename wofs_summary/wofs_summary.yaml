@@ -1,10 +1,19 @@
 name: ls_usgs_wofs_summary
-description: TODO
+description: Water Observations from Space Annual Statistics
 metadata_type: eo3
 
 metadata:
   product:
     name: ls_usgs_wofs_summary
+
+storage:
+    crs: EPSG:102022
+    resolution:
+        x: 30
+        y: -30
+    tile_size:
+        x: 150000.0
+        y: 150000.0
 
 measurements:
 - name: count_wet
