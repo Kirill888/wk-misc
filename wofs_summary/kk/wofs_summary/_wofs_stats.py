@@ -27,18 +27,18 @@ grids:
 
 measurements:
   count_wet:
-    path: WOFS_{{epsg}}_{{tx}}_{{ty}}_{{year}}_summary_count_wet.tif
+    path: {{paths["count_wet"]}}
   count_dry:
-    path: WOFS_{{epsg}}_{{tx}}_{{ty}}_{{year}}_summary_count_dry.tif
+    path: {{paths["count_dry"]}}
   frequency:
-    path: WOFS_{{epsg}}_{{tx}}_{{ty}}_{{year}}_summary_frequency.tif
+    path: {{paths["frequency"]}}
 
 properties:
   datetime: {{year}}-01-01T00:00:00.000
   dtr:start_datetime: {{year}}-01-01T00:00:00.000
   dtr:end_datetime: {{year}}-12-31T23:59:59.999
   odc:file_format: GeoTIFF
-  odc:region_code: {{ "%+04d"%tx}}{{"%+04d"%ty}}
+  odc:region_code: {{"%+04d"%tx}}{{"%+04d"%ty}}
   odc:processing_datetime: {{processing_datetime}}
 ''')
 
@@ -82,9 +82,27 @@ def gs_uniq_string(gs):
     return fmt.format(*nn)
 
 
+def get_paths(tidx, year, grid):
+    fname_fmt = "WOFS_{epsg}_{tx:d}_{ty:d}_{year:d}_summary_{band}.tif"
+    yml_fmt = "WOFS_{epsg}_{tx:d}_{ty:d}_{year:d}_summary.yaml"
+
+    tx, ty = tidx
+    fmt_opts = dict(epsg=grid.crs.epsg,
+                    tx=tx,
+                    ty=ty,
+                    year=year)
+
+    oo = {band: fname_fmt.format(**fmt_opts, band=band)
+          for band in ["count_wet", "count_dry", "frequency"]}
+
+    oo["yaml"] = yml_fmt.format(**fmt_opts)
+    return oo
+
+
 def mk_yaml(tidx, year, grid_spec,
             transform_precision=0,
             processing_datetime=None,
+            paths=None,
             **tags):
     transform_fmt = '[{:.{n}f},{:.{n}f},{:.{n}f},  {:.{n}f},{:.{n}f},{:.{n}f},  {:.0f},{:.0f},{:.0f}]'
     tx, ty = tidx
@@ -98,6 +116,9 @@ def mk_yaml(tidx, year, grid_spec,
     if not isinstance(processing_datetime, str):
         processing_datetime = processing_datetime.isoformat()
 
+    if paths is None:
+        paths = get_paths(tidx, year, grid_spec)
+
     _id = odc_uuid('wofs_summary',
                    algorithm_version='1',
                    sources=[],
@@ -109,6 +130,7 @@ def mk_yaml(tidx, year, grid_spec,
 
     return yaml_doc_tpl.render(uuid=str(_id),
                                processing_datetime=processing_datetime,
+                               paths=paths,
                                epsg=epsg, year=year, tx=tx, ty=ty,
                                width=width, height=height, transform=transform)
 
@@ -139,8 +161,6 @@ def do_annual_wofs_stats(tidx,
                          grid=None,
                          zlevel=6,
                          datasets=None):
-    fname_fmt = "WOFS_{epsg}_{tx:d}_{ty:d}_{year:d}_summary_{band}.tif"
-    yml_fmt = "WOFS_{epsg}_{tx:d}_{ty:d}_{year:d}_summary.yaml"
 
     if grid is None:
         grid = mk_africa_albers_gs()
@@ -150,6 +170,8 @@ def do_annual_wofs_stats(tidx,
 
     if dc is None:
         dc = Datacube(env=env)
+
+    paths = get_paths(tidx, year, grid)
 
     geobox = grid.tile_geobox(tidx)
     query = dict(
@@ -172,18 +194,12 @@ def do_annual_wofs_stats(tidx,
                     predictor=2,  # force it even for float32, seems to work better
                     zlevel=zlevel)
 
-    tx, ty = tidx
-    fmt_opts = dict(epsg=geobox.crs.epsg,
-                    tx=tx,
-                    ty=ty,
-                    year=year)
-
-    yml_fname = yml_fmt.format(**fmt_opts)
+    yml_fname = paths['yaml']
     with open(output_dir/yml_fname, 'wt') as out:
-        out.write(mk_yaml(tidx, year, grid))
+        out.write(mk_yaml(tidx, year, grid, paths=paths))
 
     for band in ww.data_vars:
-        file_name = fname_fmt.format(**fmt_opts, band=band)
+        file_name = paths[band]
 
         write_cog(output_dir/file_name,
                   ww[band],

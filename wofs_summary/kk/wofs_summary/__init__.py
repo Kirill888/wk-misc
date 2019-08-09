@@ -4,6 +4,7 @@ from ._wofs_stats import (
     start_local_dask,
     mk_africa_albers_gs,
     mk_yaml,
+    get_paths,
 )
 
 __all__ = (
@@ -12,4 +13,5 @@ __all__ = (
     "start_local_dask",
     "mk_africa_albers_gs",
     "mk_yaml",
+    "get_paths",
 )
