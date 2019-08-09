@@ -1,6 +1,7 @@
 import xarray as xr
 from pathlib import Path
 from dask import array as da
+from datetime import datetime
 from jinja2 import Template
 
 from datacube.storage.masking import make_mask
@@ -33,11 +34,12 @@ measurements:
     path: WOFS_{{epsg}}_{{tx}}_{{ty}}_{{year}}_summary_frequency.tif
 
 properties:
-  datetime: {{year}}-01-01 00:00:00.000
-  dtr:start_datetime: {{year}}-01-01 00:00:00.000
-  dtr:end_datetime: {{year}}-12-31 23:59:59.999
+  datetime: {{year}}-01-01T00:00:00.000
+  dtr:start_datetime: {{year}}-01-01T00:00:00.000
+  dtr:end_datetime: {{year}}-12-31T23:59:59.999
   odc:file_format: GeoTIFF
   odc:region_code: {{ "%+04d"%tx}}{{"%+04d"%ty}}
+  odc:processing_datetime: {{processing_datetime}}
 ''')
 
 
@@ -82,12 +84,19 @@ def gs_uniq_string(gs):
 
 def mk_yaml(tidx, year, grid_spec,
             transform_precision=0,
+            processing_datetime=None,
             **tags):
     transform_fmt = '[{:.{n}f},{:.{n}f},{:.{n}f},  {:.{n}f},{:.{n}f},{:.{n}f},  {:.0f},{:.0f},{:.0f}]'
     tx, ty = tidx
     gbox = grid_spec.tile_geobox(tidx)
     height, width = gbox.shape
     epsg = gbox.crs.epsg
+
+    if processing_datetime is None:
+        processing_datetime = datetime.utcnow().replace(microsecond=0, second=0)  # minute precision
+
+    if not isinstance(processing_datetime, str):
+        processing_datetime = processing_datetime.isoformat()
 
     _id = odc_uuid('wofs_summary',
                    algorithm_version='1',
@@ -99,6 +108,7 @@ def mk_yaml(tidx, year, grid_spec,
     transform = transform_fmt.format(*gbox.transform, n=transform_precision)
 
     return yaml_doc_tpl.render(uuid=str(_id),
+                               processing_datetime=processing_datetime,
                                epsg=epsg, year=year, tx=tx, ty=ty,
                                width=width, height=height, transform=transform)
 
