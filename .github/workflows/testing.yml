@@ -5,7 +5,7 @@ on: [push]
 env:
   ORG: opendatacube
   IMAGE: geobase
-  zzz: ${{ ${ORG}/${IMAGE} }}
+  zzz: ${{ env.ORG }}/${{ env.IMAGE }}
   ghref: ${{ github.ref }}
 
 jobs:
