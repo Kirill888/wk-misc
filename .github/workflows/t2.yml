@@ -1,0 +1,32 @@
+name: CI2
+
+on:
+  push:
+    branches:
+      - master
+      - 'testing-**'
+    paths:
+      - '**.yml' 
+      - 'docs/**'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v1
+    - name: Fake build
+      run: |
+        echo "This is worklow2:: build"
+        env | grep GITHUB
+
+  publish:
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v1
+    - name: Fake publish
+      run: |
+        echo "This is worklow2:: publish"
+        env | grep GITHUB
+
+
