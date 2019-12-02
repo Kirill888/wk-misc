@@ -7,11 +7,6 @@ env:
   IMAGE: geobase
   ghref: ${{ github.ref }}
 
-strategy:
-  matrix:
-    org: opendatacube
-    image: geobase
-
 jobs:
   build:
 
