@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: dask-scheduler
+  labels:
+    app: dask-scheduler
+spec:
+  clusterIP: "None"
+  ports:
+    - name: dask-scheduler
+      port: 8786 
+      targetPort: 8786
+    - name: dask-webui
+      port: 8787 
+      targetPort: 8787
+  selector:
+    app: dask-scheduler 
+  type: ClusterIP

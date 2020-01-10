@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: "dask-scheduler"
+  labels:
+    app: "dask-scheduler"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: "dask-scheduler"
+  template:
+    metadata:
+      labels:
+        app: "dask-scheduler"
+    spec:
+      containers:
+      - name: "dask-scheduler"
+        image: "kkodc/sandbox:latest"
+        resources:
+          requests:
+            memory: "4Gi"
+            cpu: "1"
+          limits:
+            memory: "4Gi"
+            cpu: "1"
+        args:
+          - dask-scheduler
+          - "--port=8786"
+          - "--dashboard-address=0.0.0.0:8787"
+        ports:
+          - containerPort: 8786
+          - containerPort: 8787

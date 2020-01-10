@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: "dask-worker"
+  labels:
+    app: "dask-worker"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: "dask-worker"
+  template:
+    metadata:
+      labels:
+        app: "dask-worker"
+    spec:
+      containers:
+      - name: "dask-worker"
+        image: "kkodc/sandbox:latest"
+        resources:
+          requests:
+            cpu: "1"
+            memory: "4Gi"
+          limits:
+            cpu: "1"
+            memory: "4Gi"
+        env:
+          - name: DB_HOSTNAME
+            value: database.local
+          - name: DB_PORT
+            value: "5432"
+          - name: DB_DATABASE
+            value: "ows"
+          - name: DB_USERNAME 
+            valueFrom:
+              secretKeyRef:
+                name: ows
+                key: postgres-username
+
+          - name: DB_PASSWORD 
+            valueFrom:
+              secretKeyRef:
+                name: ows
+                key: postgres-password
+
+        args:
+          - dask-worker
+          - "--nthreads=1"
+          - "--memory-limit=4Gi"
+          - "--worker-port=11911"
+          - "--nanny-port=11912"
+          - "--dashboard-address=0:11913"
+          - "--reconnect"
+          - "tcp://dask-scheduler.default.svc.cluster.local:8786"
+
+        ports:
+          - containerPort: 11911
+          - containerPort: 11912
+          - containerPort: 11913
+
