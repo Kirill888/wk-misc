@@ -1,19 +1,18 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: "dask-scheduler"
+  name: "notebook"
   labels:
-    app: "dask-scheduler"
+    app: "notebook"
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: "dask-scheduler"
-
+      app: "notebook"
   template:
     metadata:
       labels:
-        app: "dask-scheduler"
+        app: "notebook"
     spec:
       affinity:
         nodeAffinity:
@@ -25,24 +24,31 @@ spec:
                     values:
                       - ondemand
 
+      volumes:
+        - name: kk-nb-home
+          persistentVolumeClaim:
+            claimName: kk-nb-home
+
       containers:
-      - name: "dask-scheduler"
+      - name: "notebook"
         image: "opendatacube/sandbox:latest"
-
-        env:
-          - name: SCHEDULER_PORT
-            value: "8786"
-
-          - name: DASHBOARD_PORT
-            value: "8787"
-
+        volumeMounts:
+          - mountPath: /home/jovyan
+            name: kk-nb-home
         resources:
           requests:
-            memory: "16Gi"
             cpu: "2"
+            memory: "16Gi"
           limits:
-            memory: "16Gi"
-            cpu: "2"
+            cpu: "4"
+            memory: "32Gi"
+        env:
+          - name: DATACUBE_DB_URL
+            valueFrom:
+              secretKeyRef:
+                name: db-sandbox
+                key: ro-url
+
         args:
           - bash
           - "-c"
@@ -54,10 +60,10 @@ spec:
                 --no-deps \
                 $LIBS
 
-              dask-scheduler \
-                --port="${SCHEDULER_PORT}" \
-                --dashboard-address=0.0.0.0:"${DASHBOARD_PORT}"
+
+              sudo chown -R jovyan:users .
+              simpleproxy -L 127.0.0.1:8787 -R dask-scheduler:8787 -d
+              jupyter lab --no-browser --ip=0.0.0.0 --port=18899
 
         ports:
-          - containerPort: 8786
-          - containerPort: 8787
+          - containerPort: 18899
