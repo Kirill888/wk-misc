@@ -10,7 +10,6 @@ from datacube.utils.geometry import CRS
 from datacube.model import GridSpec
 import odc.algo
 from odc.index import odc_uuid
-import yaml
 
 
 def month_range(year: int, month: int, n: int) -> Tuple[datetime.datetime, datetime.datetime]:
@@ -50,6 +49,11 @@ def season_range(year: int, season: str) -> Tuple[datetime.datetime, datetime.da
     return month_range(year, start_month, 3)
 
 
+def transform_to_yaml_text(transform, precision=3):
+    fmt = '[{:.{n}f},{:.{n}f},{:.{n}f},  {:.{n}f},{:.{n}f},{:.{n}f},  {:.0f},{:.0f},{:.0f}]'
+    return fmt.format(*transform, n=precision)
+
+
 def mk_utm_gs(epsg,
               resolution=10,
               pixels_per_cell=10_000,
@@ -83,43 +87,6 @@ def utm_key(epsg, tidx=None):
     return f'{zone:02d}{code}_{tidx[0]:02d}_{tidx[1]:02d}'
 
 
-def to_object(d):
-    def _convert(d):
-        if isinstance(d, dict):
-            return SimpleNamespace(**{k: _convert(v) for k, v in d.items()})
-        elif isinstance(d, list):
-            return [_convert(v) for v in d]
-        else:
-            return d
-
-    return _convert(d)
-
-
-def utm_tile_dss(dss, **extra_keys):
-    grid_specs = {}
-    dss_by_tile = {}
-
-    for ds in dss:
-        epsg = ds.crs.epsg
-        if epsg not in grid_specs:
-            grid_specs[epsg] = (mk_utm_gs(epsg), {})
-
-        gs, g_cache = grid_specs.get(epsg)
-
-        for tidx, _ in gs.tiles_from_geopolygon(ds.extent, geobox_cache=g_cache):
-            k = (epsg, *tidx)
-            dss_by_tile.setdefault(k, []).append(ds)
-
-    tasks = [SimpleNamespace(region=k,
-                             dss=sorted(dss, key=lambda ds: ds.time),
-                             grid_spec=grid_specs[k[0]][0],
-                             **extra_keys)
-             for k, dss in dss_by_tile.items()]
-
-    tasks = sorted(tasks, key=lambda t: t.region)
-    return tasks
-
-
 def utm_zone_to_epsg(zone):
     """
       56S -> 32756
@@ -148,56 +115,94 @@ def utm_zone_to_epsg(zone):
     return offset + i
 
 
-def _to_yaml(obj):
-    return yaml.dump(obj,
-                     default_flow_style=False,
-                     sort_keys=False,
-                     Dumper=getattr(yaml, 'CSafeDumper', yaml.SafeDumper))
+def to_object(d):
+    def _convert(d):
+        if isinstance(d, dict):
+            return SimpleNamespace(**{k: _convert(v) for k, v in d.items()})
+        elif isinstance(d, list):
+            return [_convert(v) for v in d]
+        else:
+            return d
+
+    return _convert(d)
 
 
-def build_yaml_template(cfg):
-    measurements = {n: dict(path=f'<<file_prefix>>_{n}.tif')
-                    for n in cfg.bands}
+def mk_task(tile, cfg, **extra):
+    epsg, x, y = tile.region
+    utm_code = utm_key(epsg)
+    period = cfg.period
+    year = period[0].year
+    month = period[0].month
+    start, end = (t.strftime('%Y%m%d') for t in period)
 
-    mm_yaml_template = _to_yaml(dict(measurements=measurements))
-    mm_yaml_template = mm_yaml_template.replace('<<', '{{').replace('>>', '}}')
+    sensor = extra.pop('sensor', 'S2')
+    uuid_extra = extra.pop('uuid_extra', {})
 
-    return '''---
-# Dataset
-$schema: https://schemas.opendatacube.org/dataset
-id: {{uuid}}
+    uuid = odc_uuid(algorithm='geomedian',
+                    algorithm_version='1.0.0',
+                    sources=[ds.id for ds in tile.dss],
+                    sensor=sensor,
+                    region=tile.region,
+                    period=period,
+                    **uuid_extra)
 
-product:
-  name: {{product}}
-  href: https://collections.dea.ga.gov.au/product/{{product}}
+    return SimpleNamespace(
+        uuid=uuid,
+        region=tile.region,
+        dss=sorted(tile.dss, key=lambda ds: ds.time),
+        period=period,
+        geobox=tile.geobox,
+        bands=cfg.bands,
+        product=cfg.output_product,
 
-crs: {{ geobox.crs }}
-grids:
-  default:
-    shape: [{{ geobox.shape[0] }}, {{ geobox.shape[1] }}]
-    transform: {{ _self.transform_to_yaml_text(geobox.transform, 1) }}
+        dataset_prefix=f"{utm_code}_{x:02d}_{y:02d}/{year:04d}{month:02d}/",
+        file_prefix=f'S2_GM-{utm_code}_{x:02d}_{y:02d}-{start}_{end}',
 
-properties:
-  odc:region_code: {{region_code}}
-  datetime: {{t_start}}
-  dtr:start_datetime: {{t_start}}
-  dtr:end_datetime: {{t_end}}
-  odc:file_format: GeoTIFF
-  odc:processing_datetime: {{processing_datetime}}
+        **extra
+    )
 
-measurements:{% for band in bands %}
-  {{ band }}:
-    path: {{ file_prefix }}_{{ band }}.tif{% endfor %}
 
-lineage:
-  inputs: {% for ds in dss %}
-  - {{ ds.id }}{% endfor %}
-...
-'''
+def utm_tile_dss(dss):
+    """
+
+    Returns
+    =======
+
+    List of Tile objects, each is:
+      .region    : (epsg,  tile_idx_x, tile_idx_y)
+      .grid_spec : GridSpec
+      .geobox    : GeoBox
+      .dss       : [Dataset]
+    """
+    grid_specs = {}
+    tiles = {}
+
+    for ds in dss:
+        epsg = ds.crs.epsg
+        if epsg not in grid_specs:
+            grid_specs[epsg] = (mk_utm_gs(epsg), {})
+
+        gs, g_cache = grid_specs.get(epsg)
+
+        for tidx, geobox in gs.tiles_from_geopolygon(ds.extent, geobox_cache=g_cache):
+            region = (epsg, *tidx)
+            tile = tiles.get(region, None)
+
+            if tile is None:
+                tile = SimpleNamespace(
+                    region=region,
+                    grid_spec=gs,
+                    geobox=geobox,
+                    dss=[])
+                tiles[region] = tile
+
+            tile.dss.append(ds)
+
+    return sorted(tiles.values(), key=lambda t: t.region)
 
 
 def load_config(fname):
-    cfg = to_object(toml.load('gmcfg.toml'))
+    cfg = to_object(toml.load(fname))
 
     cfg.s3.creds = ReadOnlyCredentials(cfg.s3.key,
                                        cfg.s3.secret,
@@ -208,53 +213,32 @@ def load_config(fname):
     return cfg
 
 
-def ds_prefix(task):
-    epsg = task.region[0]
-    x, y = task.region[1:3]
-    utm_code = utm_key(epsg)
-    year = task.period[0].year
-    month = task.period[0].month
-
-    return f"{utm_code}_{x:02d}_{y:02d}/{year:04d}{month:02d}/"
-
-
-def transform_to_yaml_text(transform, precision=3):
-    fmt = '[{:.{n}f},{:.{n}f},{:.{n}f},  {:.{n}f},{:.{n}f},{:.{n}f},  {:.0f},{:.0f},{:.0f}]'
-    return fmt.format(*transform, n=precision)
-
-
-def f_prefix(task):
-    region_code = utm_key(task.region)
-    start, end = (t.strftime('%Y%m%d') for t in task.period)
-
-    f_prefix = f'S2_GM-{region_code}-{start}_{end}'
-    return f_prefix
-
-
 def load_task(task, dc, cfg=None):
     if cfg is None:
-        cfg = task.cfg
+        cfg = getattr(task, 'cfg', None)
 
-    tidx = task.region[1:]
-    geobox = task.grid_spec.tile_geobox(tidx)
-    chunks = {'y': cfg.dask.load_chunks[0],
-              'x': cfg.dask.load_chunks[1]}
+    if cfg is not None:
+        chunks = {'y': cfg.dask.load_chunks[0],
+                  'x': cfg.dask.load_chunks[1]}
+    else:
+        chunks = {}
 
     xx = dc.load(
-        like=geobox,
-        measurements=cfg.bands + ['fmask'],
+        like=task.geobox,
+        measurements=task.bands + ['fmask'],
         group_by='solar_day',
         datasets=task.dss,
         dask_chunks=chunks)
 
-    xx.attrs['_cfg'] = cfg
     xx.attrs['_task'] = task
 
     return xx
 
 
-def mk_geomedian(xx):
-    cfg = xx._cfg
+def mk_geomedian(xx, cfg=None):
+    if cfg is None:
+        cfg = xx._task.cfg
+
     chunk_y, chunk_x = cfg.dask.work_chunks
 
     nocloud = odc.algo.fmask_to_bool(xx.fmask, ('water', 'snow', 'valid'))
@@ -276,30 +260,48 @@ def task_uuid(task, **other_tags):
                     **other_tags)
 
 
-def render_task_yaml(task, cfg=None, processing_datetime=None):
-    if cfg is None:
-        cfg = task.cfg
-
+def render_task_yaml(task, processing_datetime=None):
     if processing_datetime is None:
         processing_datetime = datetime.datetime.utcnow()
 
-    if isinstance(processing_datetime, datetime.datetime):
-        processing_datetime = processing_datetime.strftime("%Y-%m-%dT%H:%M:%S")
+    return _YAML.render(task=task,
+                        _self=sys.modules[__name__],
+                        processing_datetime=processing_datetime)
 
-    geobox = task.grid_spec.tile_geobox(task.region[1:])
-    ny, nx = geobox.shape
-    t_start, t_end = (p.strftime("%Y-%m-%dT%H:%M:%S.%f") for p in cfg.period)
 
-    pp = dict(product="s2_gm_seasonal",
-              uuid=task_uuid(task),
-              geobox=geobox,
-              _self=sys.modules[__name__],
-              bands=cfg.bands,
-              dss=task.dss,
-              file_prefix=f_prefix(task),
-              region_code=utm_key(task.region),
-              t_start=t_start,
-              t_end=t_end,
-              processing_datetime=processing_datetime)
+_YAML = jinja2.Template('''---
+# Dataset
+$schema: https://schemas.opendatacube.org/dataset
+id: {{ task.uuid}}
 
-    return jinja2.Template(cfg.yaml_template).render(**pp)
+product:
+  name: {{ task.product }}
+  href: https://collections.dea.ga.gov.au/product/{{task.product}}
+
+crs: {{ task.geobox.crs }}
+grids:
+  default:
+    shape: [{{ task.geobox.shape[0] }}, {{ task.geobox.shape[1] }}]
+    transform: {{ _self.transform_to_yaml_text(task.geobox.transform, 1) }}
+
+properties:
+  odc:region_code: {{ _self.utm_key(task.region) }}
+  datetime: {{ task.period[0].strftime("%Y-%m-%dT%H:%M:%S.%f") }}
+  dtr:start_datetime: {{ task.period[0].strftime("%Y-%m-%dT%H:%M:%S.%f") }}
+  dtr:end_datetime: {{ task.period[1].strftime("%Y-%m-%dT%H:%M:%S.%f") }}
+  odc:file_format: GeoTIFF
+  odc:processing_datetime: {{ processing_datetime.strftime("%Y-%m-%dT%H:%M:%S") }}
+
+measurements:
+{% for band in task.bands %}
+  {{ band }}:
+    path: {{ task.file_prefix }}_{{ band }}.tif
+{% endfor %}
+
+lineage:
+  inputs:
+  {% for ds in task.dss %}
+  - {{ ds.id }}
+  {% endfor %}
+...
+''', trim_blocks=True)
