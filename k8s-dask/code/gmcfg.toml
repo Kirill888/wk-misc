@@ -1,0 +1,38 @@
+year = 2019
+season = "jja"
+utm_zones = ["55S", "56S"]
+
+products = ["ga_s2a_ard_nbar_granule",
+            "ga_s2b_ard_nbar_granule"]
+
+output_product = 's2_gm_seasonal'
+
+bands = [
+ "nbar_coastal_aerosol",
+ "nbar_blue",
+ "nbar_green",
+ "nbar_red",
+ "nbar_red_edge_1",
+ "nbar_red_edge_2",
+ "nbar_red_edge_3",
+ "nbar_nir_1",
+ "nbar_nir_2",
+ "nbar_swir_2",
+ "nbar_swir_3",
+]
+
+[dask]
+load_chunks = [5000, 5000]
+work_chunks = [1000, 1000]
+
+[cog]
+zlevel = 9
+overview_levels = [4, 8, 16, 32]
+overview_resampling = "average"
+blocksize = 1024
+
+[s3]
+# get key/secret from S3_WRITE_{KEY|SECRET} env vars
+key    = "env/S3_WRITE_KEY"
+secret = "env/S3_WRITE_SECRET"
+prefix = "s3://dea-public-data-dev/temp/s2_gm/seasonal/v0/combined/"
