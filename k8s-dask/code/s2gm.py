@@ -1,135 +1,54 @@
-import datetime
-from typing import Tuple
+import os
 from types import SimpleNamespace
 from botocore.credentials import ReadOnlyCredentials
 import toml
-import jinja2
-import sys
 
-from datacube.utils.geometry import CRS
-from datacube.model import GridSpec
+from datacube import Datacube
 import odc.algo
-from odc.index import odc_uuid
+from odc.index import (
+    odc_uuid,
+    utm_region_code,
+    utm_zone_to_epsg,
+    season_range,
+    utm_tile_dss,
+    render_eo3_yaml,
+)
+
+from datacube.utils.cog import to_cog
+from datacube.utils.dask import save_blob_to_s3
 
 
-def month_range(year: int, month: int, n: int) -> Tuple[datetime.datetime, datetime.datetime]:
-    """ Return time range covering n months start from year, month
-        month 1..12
-        month can also be negative
-        2020, -1 === 2019, 12
-    """
-    if month < 0:
-        return month_range(year-1, 12+month+1, n)
-
-    y2 = year
-    m2 = month + n
-    if m2 > 12:
-        m2 -= 12
-        y2 += 1
-    dt_eps = datetime.timedelta(microseconds=1)
-
-    return (datetime.datetime(year=year, month=month, day=1),
-            datetime.datetime(year=y2, month=m2, day=1) - dt_eps)
-
-
-def season_range(year: int, season: str) -> Tuple[datetime.datetime, datetime.datetime]:
-    """ Season is one of djf, mam, jja, son.
-
-        DJF for year X starts in Dec X-1 and ends in Feb X.
-    """
-    seasons = dict(
-        djf=-1,
-        mam=2,
-        jja=6,
-        son=9)
-
-    start_month = seasons.get(season.lower())
-    if start_month is None:
-        raise ValueError(f"No such season {season}, valid seasons are: djf,mam,jja,son")
-    return month_range(year, start_month, 3)
-
-
-def transform_to_yaml_text(transform, precision=3):
-    fmt = '[{:.{n}f},{:.{n}f},{:.{n}f},  {:.{n}f},{:.{n}f},{:.{n}f},  {:.0f},{:.0f},{:.0f}]'
-    return fmt.format(*transform, n=precision)
-
-
-def mk_utm_gs(epsg,
-              resolution=10,
-              pixels_per_cell=10_000,
-              origin=(0, 0)):
-    if not isinstance(resolution, tuple):
-        resolution = (-resolution, resolution)
-
-    tile_size = tuple([abs(r)*pixels_per_cell for r in resolution])
-
-    return GridSpec(crs=CRS(f'epsg:{epsg}'),
-                    resolution=resolution,
-                    tile_size=tile_size,
-                    origin=origin)
-
-
-def utm_key(epsg, tidx=None):
-    if isinstance(epsg, tuple):
-        tidx = epsg[1:]
-        epsg = epsg[0]
-
-    if 32601 <= epsg <= 32660:
-        zone, code = epsg-32600, 'N'
-    elif 32701 <= epsg <= 32760:
-        zone, code = epsg - 32700, 'S'
-    else:
-        raise ValueError(f"Not a utm epsg: {epsg}, valid ranges [32601, 32660] and [32701, 32760]")
-
-    if tidx is None:
-        return f'{zone:02d}{code}'
-
-    return f'{zone:02d}{code}_{tidx[0]:02d}_{tidx[1]:02d}'
-
-
-def utm_zone_to_epsg(zone):
-    """
-      56S -> 32756
-      55N -> 32655
-    """
-    if len(zone) < 2:
-        raise ValueError(f'Not a valid zone: "{zone}", expect <int: 1-60><str:S|N>')
-
-    offset = dict(S=32700,
-                  N=32600).get(zone[-1].upper())
-
-    if offset is None:
-        raise ValueError(f'Not a valid zone: "{zone}", expect <int: 1-60><str:S|N>')
-
-    try:
-        i = int(zone[:-1])
-    except ValueError:
-        i = None
-
-    if i < 0 or i > 60:
-        i = None
-
-    if i is None:
-        raise ValueError(f'Not a valid zone: "{zone}", expect <int: 1-60><str:S|N>')
-
-    return offset + i
-
-
-def to_object(d):
+def to_object(d, with_env=True):
     def _convert(d):
         if isinstance(d, dict):
             return SimpleNamespace(**{k: _convert(v) for k, v in d.items()})
         elif isinstance(d, list):
             return [_convert(v) for v in d]
+        elif isinstance(d, str) and with_env:
+            if d.startswith('env/'):
+                return os.environ.get(d[4:], None)
+            else:
+                return d
         else:
             return d
 
     return _convert(d)
 
 
+def task_uuid(task, **other_tags):
+    sources = [ds.id for ds in task.dss]
+    return odc_uuid(algorithm='geomedian',
+                    algorithm_version='1.0.0',
+                    sources=sources,
+                    sensor='S2AB',
+                    region=task.region,
+                    period=task.period,
+                    **other_tags)
+
+
 def mk_task(tile, cfg, **extra):
     epsg, x, y = tile.region
-    utm_code = utm_key(epsg)
+    utm_code = utm_region_code(epsg)
     period = cfg.period
     year = period[0].year
     month = period[0].month
@@ -154,6 +73,9 @@ def mk_task(tile, cfg, **extra):
         geobox=tile.geobox,
         bands=cfg.bands,
         product=cfg.output_product,
+        region_code=utm_region_code(tile.region),
+
+        input_bands=cfg.input_bands,
 
         dataset_prefix=f"{utm_code}_{x:02d}_{y:02d}/{year:04d}{month:02d}/",
         file_prefix=f'S2_GM-{utm_code}_{x:02d}_{y:02d}-{start}_{end}',
@@ -162,43 +84,11 @@ def mk_task(tile, cfg, **extra):
     )
 
 
-def utm_tile_dss(dss):
-    """
+def dss_to_tasks(dss, cfg):
+    if cfg.selected_epsgs:
+        dss = (ds for ds in dss if ds.crs.epsg in cfg.selected_epsgs)
 
-    Returns
-    =======
-
-    List of Tile objects, each is:
-      .region    : (epsg,  tile_idx_x, tile_idx_y)
-      .grid_spec : GridSpec
-      .geobox    : GeoBox
-      .dss       : [Dataset]
-    """
-    grid_specs = {}
-    tiles = {}
-
-    for ds in dss:
-        epsg = ds.crs.epsg
-        if epsg not in grid_specs:
-            grid_specs[epsg] = (mk_utm_gs(epsg), {})
-
-        gs, g_cache = grid_specs.get(epsg)
-
-        for tidx, geobox in gs.tiles_from_geopolygon(ds.extent, geobox_cache=g_cache):
-            region = (epsg, *tidx)
-            tile = tiles.get(region, None)
-
-            if tile is None:
-                tile = SimpleNamespace(
-                    region=region,
-                    grid_spec=gs,
-                    geobox=geobox,
-                    dss=[])
-                tiles[region] = tile
-
-            tile.dss.append(ds)
-
-    return sorted(tiles.values(), key=lambda t: t.region)
+    return [mk_task(t, cfg) for t in utm_tile_dss(dss)]
 
 
 def load_config(fname):
@@ -210,10 +100,12 @@ def load_config(fname):
     cfg.period = season_range(cfg.year, cfg.season)
 
     cfg.selected_epsgs = set([utm_zone_to_epsg(z) for z in cfg.utm_zones])
+    cfg.input_bands = cfg.bands + ['fmask']
+
     return cfg
 
 
-def load_task(task, dc, cfg=None):
+def load_task_input(task, cfg=None, group_by='solar_day', **kw):
     if cfg is None:
         cfg = getattr(task, 'cfg', None)
 
@@ -221,24 +113,25 @@ def load_task(task, dc, cfg=None):
         chunks = {'y': cfg.dask.load_chunks[0],
                   'x': cfg.dask.load_chunks[1]}
     else:
-        chunks = {}
+        chunks = kw.pop('dask_chunks', {})
 
-    xx = dc.load(
-        like=task.geobox,
-        measurements=task.bands + ['fmask'],
-        group_by='solar_day',
-        datasets=task.dss,
-        dask_chunks=chunks)
+    if len(task.dss) == 0:
+        return None
 
-    xx.attrs['_task'] = task
+    product = task.dss[0].type
+    measurements = product.lookup_measurements(task.input_bands)
+
+    xx = Datacube.load_data(
+        Datacube.group_datasets(task.dss, group_by),
+        task.geobox,
+        measurements=measurements,
+        dask_chunks=chunks,
+        **kw)
 
     return xx
 
 
-def mk_geomedian(xx, cfg=None):
-    if cfg is None:
-        cfg = xx._task.cfg
-
+def mk_fmask_geomedian(xx, cfg, pix_scale=1/10_000):
     chunk_y, chunk_x = cfg.dask.work_chunks
 
     nocloud = odc.algo.fmask_to_bool(xx.fmask, ('water', 'snow', 'valid'))
@@ -246,62 +139,30 @@ def mk_geomedian(xx, cfg=None):
     xx_clean = odc.algo.keep_good_only(xx_data, where=nocloud)
     xx_clean = xx_clean.chunk(chunks=dict(time=-1, x=chunk_x, y=chunk_y))
 
-    return odc.algo.int_geomedian(xx_clean, scale=1/10_000)
+    return odc.algo.int_geomedian(xx_clean, scale=pix_scale)
 
 
-def task_uuid(task, **other_tags):
-    sources = [ds.id for ds in task.dss]
-    return odc_uuid(algorithm='geomedian',
-                    algorithm_version='1.0.0',
-                    sources=sources,
-                    sensor='S2AB',
-                    region=task.region,
-                    period=task.period,
-                    **other_tags)
+def process_task(task, cfg):
+    output_prefix = cfg.s3.prefix + task.dataset_prefix + task.file_prefix
+    creds = cfg.s3.creds
 
+    xx = load_task_input(task, cfg)
+    gm = mk_fmask_geomedian(xx, cfg)
 
-def render_task_yaml(task, processing_datetime=None):
-    if processing_datetime is None:
-        processing_datetime = datetime.datetime.utcnow()
+    cog_params = cfg.cog.__dict__
+    transform_precision = 0  # TODO: config or auto-sense
 
-    return _YAML.render(task=task,
-                        _self=sys.modules[__name__],
-                        processing_datetime=processing_datetime)
+    cogs = [save_blob_to_s3(to_cog(x, **cog_params),
+                            f'{output_prefix}_{n}.tif',
+                            creds=creds,
+                            ContentType="image/tiff")
+            for n, x in gm.data_vars.items()]
 
+    yaml_txt = render_eo3_yaml(task,
+                               transform_precision=transform_precision)  # note: bakes in processing_time
 
-_YAML = jinja2.Template('''---
-# Dataset
-$schema: https://schemas.opendatacube.org/dataset
-id: {{ task.uuid}}
-
-product:
-  name: {{ task.product }}
-  href: https://collections.dea.ga.gov.au/product/{{task.product}}
-
-crs: {{ task.geobox.crs }}
-grids:
-  default:
-    shape: [{{ task.geobox.shape[0] }}, {{ task.geobox.shape[1] }}]
-    transform: {{ _self.transform_to_yaml_text(task.geobox.transform, 1) }}
-
-properties:
-  odc:region_code: {{ _self.utm_key(task.region) }}
-  datetime: {{ task.period[0].strftime("%Y-%m-%dT%H:%M:%S.%f") }}
-  dtr:start_datetime: {{ task.period[0].strftime("%Y-%m-%dT%H:%M:%S.%f") }}
-  dtr:end_datetime: {{ task.period[1].strftime("%Y-%m-%dT%H:%M:%S.%f") }}
-  odc:file_format: GeoTIFF
-  odc:processing_datetime: {{ processing_datetime.strftime("%Y-%m-%dT%H:%M:%S") }}
-
-measurements:
-{% for band in task.bands %}
-  {{ band }}:
-    path: {{ task.file_prefix }}_{{ band }}.tif
-{% endfor %}
-
-lineage:
-  inputs:
-  {% for ds in task.dss %}
-  - {{ ds.id }}
-  {% endfor %}
-...
-''', trim_blocks=True)
+    return save_blob_to_s3(yaml_txt.encode('utf-8'),
+                           f'{output_prefix}.yaml',
+                           creds=creds,
+                           with_deps=cogs,             # this ensures that yaml is written after COGs
+                           ContentType="text/x-yaml")
