@@ -48,6 +48,16 @@ spec:
               secretKeyRef:
                 name: db-sandbox
                 key: ro-url
+          - name: S3_WRITE_KEY
+            valueFrom:
+              secretKeyRef:
+                name: s3-dea-dev
+                key: rw-key
+          - name: S3_WRITE_SECRET
+            valueFrom:
+              secretKeyRef:
+                name: s3-dea-dev
+                key: rw-secret
 
         args:
           - bash
