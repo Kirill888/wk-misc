@@ -142,12 +142,15 @@ def mk_fmask_geomedian(xx, cfg, pix_scale=1/10_000):
     return odc.algo.int_geomedian(xx_clean, scale=pix_scale)
 
 
-def process_task(task, cfg):
+def process_task(task, cfg, client=None):
     output_prefix = cfg.s3.prefix + task.dataset_prefix + task.file_prefix
     creds = cfg.s3.creds
 
     xx = load_task_input(task, cfg)
     gm = mk_fmask_geomedian(xx, cfg)
+
+    if client is not None:
+        gm = client.persist(gm)
 
     cog_params = cfg.cog.__dict__
     transform_precision = 0  # TODO: config or auto-sense
@@ -161,8 +164,10 @@ def process_task(task, cfg):
     yaml_txt = render_eo3_yaml(task,
                                transform_precision=transform_precision)  # note: bakes in processing_time
 
-    return save_blob_to_s3(yaml_txt.encode('utf-8'),
+    yaml = save_blob_to_s3(yaml_txt.encode('utf-8'),
                            f'{output_prefix}.yaml',
                            creds=creds,
                            with_deps=cogs,             # this ensures that yaml is written after COGs
                            ContentType="text/x-yaml")
+
+    return (gm, yaml)
