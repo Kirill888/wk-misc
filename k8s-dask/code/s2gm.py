@@ -139,7 +139,7 @@ def mk_fmask_geomedian(xx, cfg, pix_scale=1/10_000):
     xx_clean = odc.algo.keep_good_only(xx_data, where=nocloud)
     xx_clean = xx_clean.chunk(chunks=dict(time=-1, x=chunk_x, y=chunk_y))
 
-    return odc.algo.int_geomedian(xx_clean, scale=pix_scale)
+    return xx_clean, odc.algo.int_geomedian(xx_clean, scale=pix_scale)
 
 
 def process_task(task, cfg, client=None):
@@ -147,7 +147,7 @@ def process_task(task, cfg, client=None):
     creds = cfg.s3.creds
 
     xx = load_task_input(task, cfg)
-    gm = mk_fmask_geomedian(xx, cfg)
+    xx_clean, gm = mk_fmask_geomedian(xx, cfg)
 
     if client is not None:
         gm = client.persist(gm)
@@ -170,4 +170,4 @@ def process_task(task, cfg, client=None):
                            with_deps=cogs,             # this ensures that yaml is written after COGs
                            ContentType="text/x-yaml")
 
-    return (gm, yaml)
+    return (xx_clean, gm, yaml)
