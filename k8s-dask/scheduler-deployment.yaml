@@ -25,6 +25,12 @@ spec:
                     values:
                       - ondemand
 
+              - matchExpressions:
+                  - key: failure-domain.beta.kubernetes.io/zone
+                    operator: In
+                    values:
+                     - ap-southeast-2a
+
       containers:
       - name: "dask-scheduler"
         image: "opendatacube/sandbox:latest"
