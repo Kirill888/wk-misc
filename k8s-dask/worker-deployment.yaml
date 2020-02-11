@@ -5,7 +5,7 @@ metadata:
   labels:
     app: "dask-worker"
 spec:
-  replicas: 2
+  replicas: 0
   selector:
     matchLabels:
       app: "dask-worker"
