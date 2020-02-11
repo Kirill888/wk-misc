@@ -63,15 +63,15 @@ spec:
           - bash
           - "-c"
           - |
-              LIBS="odc-algo odc-index datacube odc-ui dask==2.8.1 distributed==2.8.1"
-              sudo $(which pip) install \
+              LIBS="odc-algo odc-index odc-ui datacube"
+              pip install \
                 --upgrade \
                 --extra-index-url="https://packages.dea.ga.gov.au" \
                 --no-deps \
                 $LIBS
 
+              sudo -n chown -R jovyan:users . || true
 
-              sudo chown -R jovyan:users .
               simpleproxy -L 127.0.0.1:8787 -R dask-scheduler:8787 -d
               jupyter lab --no-browser --ip=0.0.0.0 --port=18899
 

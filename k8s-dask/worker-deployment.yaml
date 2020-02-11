@@ -45,8 +45,8 @@ spec:
           - bash
           - "-c"
           - |
-              LIBS="odc-algo odc-index datacube odc-ui dask==2.8.1 distributed==2.8.1"
-              sudo $(which pip) install \
+              LIBS="odc-algo odc-index datacube odc-ui"
+              pip install \
                 --upgrade \
                 --extra-index-url="https://packages.dea.ga.gov.au" \
                 --no-deps \
