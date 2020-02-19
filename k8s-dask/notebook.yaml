@@ -31,7 +31,7 @@ spec:
 
       containers:
       - name: "notebook"
-        image: "opendatacube/sandbox:latest"
+        image: "opendatacube/sandbox:sudo"
         volumeMounts:
           - mountPath: /home/jovyan
             name: kk-nb-home
@@ -46,8 +46,8 @@ spec:
           - name: DATACUBE_DB_URL
             valueFrom:
               secretKeyRef:
-                name: db-sandbox
-                key: ro-url
+                name: db-ows
+                key: rw-url
           - name: S3_WRITE_KEY
             valueFrom:
               secretKeyRef:

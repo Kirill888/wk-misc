@@ -29,7 +29,7 @@ spec:
                   - key: failure-domain.beta.kubernetes.io/zone
                     operator: In
                     values:
-                     - ap-southeast-2a
+                     - ap-southeast-2c
 
       containers:
       - name: "dask-scheduler"
