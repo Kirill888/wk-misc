@@ -14,6 +14,29 @@ jobs:
 
     steps:
     - uses: actions/checkout@v1
+
+    - name: Create env file
+      run: |
+        branch="${GITHUB_REF/refs\/heads\//}"
+        TAG="${branch/master/latest}"
+        BTAG="_build_cache_${branch}"
+        BTAG="${BTAG/_master//}"
+
+        cat > .env <<EOF
+        branch=${branch}
+        TAG=${TAG}
+        BTAG=${BTAG}
+        stage1="${ORG}/${IMAGE}:${BTAG}"
+        stage2="${ORG}/${IMAGE}:${TAG}"
+        EOF
+
+    - name: Check env file
+      run: |
+        source .env
+        echo "Stage1: >$stage1<"
+        echo "Stage2: >$stage2<"
+
+
     - name: Run a multi-line script
       run: |
         echo "ENV TEST: ${ORG}/${IMAGE}:${TAG}"
@@ -21,7 +44,6 @@ jobs:
         echo "ghref-direct: ${{ github.ref }}"
         env | grep "GITHUB_"
         echo "${{ matrix.org }}/${{ matrix.image }}:${TAG}"
-        export FOO="message from prev step ${TAG}"
         cat > .env <<EOF
         FOO="message from prev step ${TAG}"
         EOF
@@ -31,7 +53,5 @@ jobs:
 
     - name: Run a multi-line script
       run: |
-        echo "foo: <${FOO}>"
-        env
         source .env
         echo "foo: <${FOO}>"
