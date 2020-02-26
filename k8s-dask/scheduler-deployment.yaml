@@ -15,21 +15,28 @@ spec:
       labels:
         app: "dask-scheduler"
     spec:
+      tolerations:
+        - key: "hub.jupyter.org/dedicated"
+          operator: "Equal"
+          value: "user"
+          effect: "NoSchedule"
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
               - matchExpressions:
+                  - key: nodegroup
+                    operator: In
+                    values:
+                      - sandbox
                   - key: nodetype
                     operator: In
                     values:
                       - ondemand
-
-              - matchExpressions:
                   - key: failure-domain.beta.kubernetes.io/zone
                     operator: In
                     values:
-                     - ap-southeast-2c
+                      - ap-southeast-2c
 
       containers:
       - name: "dask-scheduler"

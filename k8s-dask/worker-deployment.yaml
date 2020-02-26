@@ -15,16 +15,24 @@ spec:
       labels:
         app: "dask-worker"
     spec:
+      tolerations:
+        - key: "hub.jupyter.org/dedicated"
+          operator: "Equal"
+          value: "worker"
+          effect: "NoSchedule"
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
               - matchExpressions:
+                  - key: nodegroup
+                    operator: In
+                    values:
+                      - sandbox
                   - key: nodetype
                     operator: In
                     values:
                       - spot
-              - matchExpressions:
                   - key: "failure-domain.beta.kubernetes.io/zone"
                     operator: In
                     values:

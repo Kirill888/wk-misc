@@ -14,15 +14,28 @@ spec:
       labels:
         app: "notebook"
     spec:
+      tolerations:
+        - key: "hub.jupyter.org/dedicated"
+          operator: "Equal"
+          value: "user"
+          effect: "NoSchedule"
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
               - matchExpressions:
+                  - key: nodegroup
+                    operator: In
+                    values:
+                      - sandbox
                   - key: nodetype
                     operator: In
                     values:
                       - ondemand
+                  # - key: failure-domain.beta.kubernetes.io/zone
+                  #   operator: In
+                  #   values:
+                  #     - ap-southeast-2c
 
       volumes:
         - name: kk-nb-home
